@@ -81,6 +81,27 @@
   .close{cursor:pointer;font-size:22px;color:var(--muted);border:none;background:none}
   .note{font-size:12px;color:var(--muted);margin-top:6px}
   a.link{color:var(--accent)}
+  /* per-file period picker */
+  .fitem{flex-direction:column;align-items:flex-start;gap:5px}
+  .fmain{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .fstat{font-size:12px;color:var(--muted)}
+  .fstat.bad{color:var(--red)} .fstat.good{color:var(--green)}
+  .pctl{font-size:12px;color:var(--muted);white-space:nowrap;background:var(--bg);padding:3px 8px;border-radius:6px;border:1px solid var(--line)}
+  .pctl select,.pctl input{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:3px 6px;font-size:12px;margin-left:3px}
+  .pctl.need{border-color:var(--red)} .pctl.need select{border-color:var(--red)}
+  .rmbtn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;line-height:1}
+  .rmbtn:hover{color:var(--red)}
+  /* in-page naming guide */
+  details.guide{margin-top:12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px}
+  details.guide summary{cursor:pointer;padding:11px 14px;font-weight:600;color:var(--accent2);font-size:14px;list-style:none;user-select:none}
+  details.guide summary::-webkit-details-marker{display:none}
+  details.guide summary:before{content:"▸ ";color:var(--accent)}
+  details.guide[open] summary:before{content:"▾ "}
+  details.guide .gbody{padding:0 16px 16px;font-size:13px;line-height:1.7}
+  details.guide table{margin:8px 0;font-size:12.5px}
+  details.guide code{background:var(--bg);padding:1px 6px;border-radius:4px;color:var(--accent2);font-size:12px}
+  details.guide .ex{background:var(--bg);border-radius:6px;padding:10px 12px;font-family:Consolas,monospace;font-size:12px;white-space:pre;overflow:auto;color:#cbd5e1}
+  .gwarn{background:#3a2a06;border:1px solid #a16207;border-radius:8px;padding:8px 12px;margin-top:8px;font-size:12.5px;color:#fde68a}
 </style>
 </head>
 <body>
@@ -96,10 +117,37 @@
     <div id="drop">
       <div style="font-size:34px">📁</div>
       <div>ลากไฟล์มาวางที่นี่ หรือ <b>คลิกเพื่อเลือกไฟล์</b></div>
-      <div class="note">รองรับ .xlsx / .csv · ระบบแยกประเภทจากชื่อไฟล์: <b>report_by_product</b> = ยอดขาย · <b>export_product_all</b> = สต็อก · <b>export_purchase</b> = PO · <b>festival/ปฏิทิน</b> = เทศกาล</div>
+      <div class="note">รองรับ .xlsx / .csv · ลากไฟล์ดิบจาก POSPOS เข้ามาได้เลย ถ้าระบบอ่านเดือนไม่ได้ ค่อยเลือกเดือนข้างไฟล์ทีหลัง</div>
       <input id="fileInput" type="file" multiple accept=".xlsx,.xls,.csv" class="hidden">
     </div>
     <div id="fileList" class="filelist"></div>
+
+    <details class="guide">
+      <summary>📛 กติกาการตั้งชื่อไฟล์ (คลิกเพื่อดู)</summary>
+      <div class="gbody">
+        ระบบดูจากชื่อไฟล์ 2 อย่าง: <b>(1) ขึ้นต้นด้วยอะไร</b> → รู้ประเภท · <b>(2) มีปี-เดือน</b> → รู้ว่าเป็นข้อมูลเดือนไหน
+        <table>
+          <thead><tr><th>ประเภท</th><th>ชื่อไฟล์ต้องขึ้นต้นด้วย</th><th>ต้องมีปี-เดือน?</th><th>ตัวอย่าง</th></tr></thead>
+          <tbody>
+            <tr><td>ยอดขายรายเดือน</td><td><code>report_by_product</code></td><td>✅ ต้องมี</td><td><code>report_by_product_2025_07</code></td></tr>
+            <tr><td>สต็อกคงเหลือ</td><td><code>export_product_all</code></td><td>❌ ไม่ต้อง (ไฟล์เดียว)</td><td><code>export_product_all_2026_07</code></td></tr>
+            <tr><td>ใบนำเข้า (PO)</td><td><code>export_purchase</code></td><td>ควรมี</td><td><code>export_purchase_2025_07</code></td></tr>
+            <tr><td>ปฏิทินเทศกาล</td><td>มีคำว่า <code>festival</code>/<code>ปฏิทิน</code></td><td>❌ ไม่ต้อง</td><td><code>festival_calendar</code></td></tr>
+          </tbody>
+        </table>
+        <b>รูปแบบปี-เดือน:</b> <code>ปปปป_ดด</code> = ปี ค.ศ. 4 หลัก _ เดือน 2 หลัก เช่น <code>2025_07</code> = กรกฎาคม 2025 ·
+        ⚠️ ปีต้องเป็น <b>ค.ศ. (2025)</b> ไม่ใช่ พ.ศ. (2568) · ตัวคั่นใช้ <code>_</code> <code>-</code> <code>.</code> ได้
+        <div class="ex">report_by_product_2023_07.xlsx   ← ยอดขาย ก.ค. 2023
+report_by_product_2024_07.xlsx   ← ยอดขาย ก.ค. 2024
+report_by_product_2025_07.xlsx   ← ยอดขาย ก.ค. 2025
+export_product_all_2026_07.xlsx  ← สต็อกปัจจุบัน (ไฟล์เดียว)
+export_purchase_2025_07.xlsx     ← PO
+festival_calendar.xlsx           ← ปฏิทินเทศกาล</div>
+        <div class="gwarn">⚠️ <b>ไม่อยากเปลี่ยนชื่อไฟล์?</b> ลากไฟล์ดิบเข้ามาได้เลย แล้ว <b>เลือกเดือน/ปีจากช่องข้างไฟล์</b> ด้านบนแทน — ได้ผลเหมือนกัน<br>
+        ⚠️ วันที่ในชื่อไฟล์ POSPOS คือ "วันกด export" ไม่ใช่เดือนของข้อมูล — ต้องเลือก/ตั้งเดือนให้ตรงกับข้อมูลจริงเสมอ<br>
+        ⚠️ สต็อกใช้ไฟล์เดียว · อย่าอัปยอดขายเดือนเดียวกันซ้ำ (ยอดจะถูกบวกซ้ำ)</div>
+      </div>
+    </details>
   </div>
 
   <!-- STEP 2: SETTINGS -->
@@ -154,7 +202,7 @@
 <script>
 /* ================= ปฏิทินเทศกาลเริ่มต้น (แก้ได้โดยอัปไฟล์ทับ) =================
    month = เดือนที่เกิดเทศกาล, ระบบเตือนล่วงหน้า 1 เดือน */
-let FESTIVALS = [
+const DEFAULT_FESTIVALS = [
   {name:"เปิดเทอม เทอม 1", month:5,  keywords:["ปากกา","ดินสอ","สมุด","ไม้บรรทัด","ยางลบ","กระเป๋า","ดินน้ำมัน","สีไม้","กบเหลา"]},
   {name:"เปิดเทอม เทอม 2", month:11, keywords:["ปากกา","ดินสอ","สมุด","ไม้บรรทัด","ยางลบ","สีไม้","แฟ้ม"]},
   {name:"เข้าพรรษา",       month:7,  keywords:["เทียน","สังฆทาน","จีวร","ธูป"]},
@@ -163,6 +211,7 @@ let FESTIVALS = [
   {name:"สงกรานต์",        month:4,  keywords:["ปืนฉีดน้ำ","แป้ง"]},
   {name:"ลอยกระทง",        month:11, keywords:["กระทง","ธูป","เทียน"]},
 ];
+let FESTIVALS = DEFAULT_FESTIVALS.slice();
 
 const THMONTHS=["","มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
 const PO_EXCLUDE="พีโอ";
@@ -525,32 +574,76 @@ drop.onclick=()=>fileInput.click();
 drop.addEventListener("drop",e=>handleFiles(e.dataTransfer.files));
 fileInput.addEventListener("change",e=>handleFiles(e.target.files));
 
+function validPeriod(p){return p&&p.m>=1&&p.m<=12&&p.y>=2000&&p.y<=2100;}
+
 async function handleFiles(fileList){
   for(const f of fileList){
     const type=detectType(f.name);
-    const period=parsePeriod(f.name);
-    let info={file:f.name,type,period,status:"กำลังอ่าน..."};
+    const p=parsePeriod(f.name);
+    const info={file:f.name,type,period:p?{y:p.y,m:p.m}:null,rows:null,status:"กำลังอ่าน...",ok:false};
     store.files.push(info);
     renderFileList();
-    try{
-      const rows=await readFile(f);
-      let r;
-      if(type==="sales")   r=ingestSales(rows,period);
-      else if(type==="stock") r=ingestStock(rows);
-      else if(type==="po")    r=ingestPO(rows);
-      else if(type==="festival") r=ingestFestival(rows);
-      else r={ok:false,msg:"ไม่รู้จักประเภทไฟล์ (ดูจากชื่อไฟล์)"};
-      info.status=r.ok?("✓ อ่านสำเร็จ "+(r.rows||0)+" แถว"+(period?(" · "+THMONTHS[period.m]+" "+period.y):"")):("✗ "+r.msg);
-      info.ok=r.ok;
-    }catch(err){info.status="✗ อ่านไฟล์ไม่ได้: "+err.message; info.ok=false;}
-    renderFileList(); refreshMonthPickers(); updateSummary();
+    try{ info.rows=await readFile(f); }
+    catch(err){ info.status="✗ อ่านไฟล์ไม่ได้: "+err.message; info.ok=false; }
   }
+  rebuildAll();
 }
+
+/* re-aggregate everything from the stored raw rows (called on upload & whenever a file's month changes) */
+function rebuildAll(){
+  store.sales={}; store.stock=null; store.po={};
+  FESTIVALS=DEFAULT_FESTIVALS.slice();
+  const seenSales={};
+  store.files.forEach(info=>{
+    if(!info.rows){ if(info.status==="กำลังอ่าน...") info.status="✗ อ่านไฟล์ไม่ได้"; return; }
+    const t=info.type;
+    if(t==="stock"){
+      const r=ingestStock(info.rows); info.ok=true; info.status="✓ สต็อก "+r.rows+" รายการ";
+    } else if(t==="festival"){
+      const r=ingestFestival(info.rows); info.ok=r.ok; info.status=r.ok?("✓ ปฏิทิน "+r.rows+" เทศกาล"):("✗ "+r.msg);
+    } else if(t==="sales"){
+      if(!validPeriod(info.period)){ info.ok=false; info.status="⚠️ โปรดเลือกเดือน/ปีของข้อมูล"; return; }
+      const key=info.period.y+"-"+String(info.period.m).padStart(2,"0");
+      const dup=seenSales[key]; seenSales[key]=true;
+      const r=ingestSales(info.rows,{key,m:info.period.m,y:info.period.y}); info.ok=true;
+      info.status="✓ ยอดขาย "+r.rows+" รายการ · "+THMONTHS[info.period.m]+" "+info.period.y+(dup?" · ⚠️ เดือนซ้ำ (ยอดถูกบวกรวม)":"");
+    } else if(t==="po"){
+      const r=ingestPO(info.rows); info.ok=true;
+      info.status="✓ PO "+r.rows+" รายการ"+(validPeriod(info.period)?(" · "+THMONTHS[info.period.m]+" "+info.period.y):"");
+    } else {
+      info.ok=false; info.status="✗ ไม่รู้จักประเภทไฟล์ (ดูจากชื่อไฟล์)";
+    }
+  });
+  renderFileList(); refreshMonthPickers(); updateSummary();
+}
+
+function monthOptions(sel){
+  let o='<option value="0">— เลือกเดือน —</option>';
+  for(let m=1;m<=12;m++) o+=`<option value="${m}"${m===sel?' selected':''}>${THMONTHS[m]}</option>`;
+  return o;
+}
+function setFileMonth(i,v){ const f=store.files[i]; f.period=f.period||{y:0,m:0}; f.period.m=+v; rebuildAll(); }
+function setFileYear(i,v){ const f=store.files[i]; f.period=f.period||{y:0,m:0}; f.period.y=parseInt(v,10)||0; rebuildAll(); }
+function removeFile(i){ store.files.splice(i,1); rebuildAll(); }
+
 function renderFileList(){
   const badge={sales:["b-sales","ยอดขาย"],stock:["b-stock","สต็อก"],po:["b-po","PO"],festival:["b-fest","เทศกาล"],unknown:["b-unk","ไม่รู้จัก"]};
-  document.getElementById("fileList").innerHTML=store.files.map(f=>{
-    const b=badge[f.type];
-    return `<div class="fitem"><span><span class="badge ${b[0]}">${b[1]}</span> &nbsp;${f.file}</span><span class="muted">${f.status||""}</span></div>`;
+  document.getElementById("fileList").innerHTML=store.files.map((f,i)=>{
+    const b=badge[f.type]||badge.unknown;
+    let pctl="";
+    if(f.type==="sales"||f.type==="po"){
+      const need=(f.type==="sales" && !validPeriod(f.period));
+      pctl=`<span class="pctl ${need?'need':''}">เดือนข้อมูล:
+        <select onchange="setFileMonth(${i},this.value)">${monthOptions(f.period?f.period.m:0)}</select>
+        <input type="number" placeholder="ปี ค.ศ." value="${f.period&&f.period.y?f.period.y:''}" onchange="setFileYear(${i},this.value)" style="width:80px">
+      </span>`;
+    }
+    const cls=f.ok?"good":(f.status&&f.status.indexOf("✗")>=0?"bad":"");
+    return `<div class="fitem">
+      <div class="fmain"><span class="badge ${b[0]}">${b[1]}</span> <span>${f.file}</span> ${pctl}
+        <button class="rmbtn" title="เอาออก" onclick="removeFile(${i})">✕</button></div>
+      <div class="fstat ${cls}">${f.status||""}</div>
+    </div>`;
   }).join("");
 }
 function refreshMonthPickers(){
