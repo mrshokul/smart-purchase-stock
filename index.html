@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ระบบคำนวณอัจฉริยะเพื่อการจัดซื้อและขจัดสินค้าค้างสต็อก</title>
+<script src="xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --line:#334155;
+    --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --accent2:#22d3ee;
+    --green:#34d399; --amber:#fbbf24; --red:#f87171; --purple:#a78bfa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI","Sarabun",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px}
+  header{background:linear-gradient(90deg,#0ea5e9,#2563eb);padding:18px 24px;box-shadow:0 2px 12px rgba(0,0,0,.4)}
+  header h1{margin:0;font-size:20px;font-weight:700;color:#fff}
+  header p{margin:4px 0 0;font-size:13px;color:#dbeafe}
+  .wrap{max-width:1280px;margin:0 auto;padding:20px 24px 60px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:18px}
+  .card h2{margin:0 0 12px;font-size:16px;color:var(--accent2)}
+  /* upload */
+  #drop{border:2px dashed var(--line);border-radius:12px;padding:28px;text-align:center;cursor:pointer;transition:.2s;background:var(--panel2)}
+  #drop.hover{border-color:var(--accent);background:#0b2536}
+  #drop b{color:var(--accent)}
+  .filelist{margin-top:14px;display:flex;flex-direction:column;gap:6px}
+  .fitem{display:flex;justify-content:space-between;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13px}
+  .badge{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:600}
+  .b-sales{background:#0e7490;color:#cffafe}
+  .b-stock{background:#4d7c0f;color:#ecfccb}
+  .b-po{background:#6d28d9;color:#ede9fe}
+  .b-fest{background:#a16207;color:#fef9c3}
+  .b-unk{background:#7f1d1d;color:#fecaca}
+  /* settings */
+  .settings{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end}
+  .fld{display:flex;flex-direction:column;gap:4px}
+  .fld label{font-size:12px;color:var(--muted)}
+  .fld select,.fld input{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font-size:14px}
+  button.run{background:linear-gradient(90deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:8px;padding:10px 22px;font-size:15px;font-weight:700;cursor:pointer}
+  button.run:hover{filter:brightness(1.1)}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 16px;cursor:pointer;font-size:14px}
+  button.ghost:hover{border-color:var(--accent)}
+  /* cards */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+  .kpi{background:linear-gradient(135deg,var(--panel2),#1a2334);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .kpi .n{font-size:26px;font-weight:800;margin-top:4px}
+  .kpi .l{font-size:13px;color:var(--muted)}
+  .kpi.red .n{color:var(--red)} .kpi.amber .n{color:var(--amber)}
+  .kpi.green .n{color:var(--green)} .kpi.blue .n{color:var(--accent)}
+  .kpi.purple .n{color:var(--purple)}
+  /* tabs */
+  .tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+  .tab{background:var(--panel2);border:1px solid var(--line);border-radius:8px 8px 0 0;padding:8px 14px;cursor:pointer;font-size:14px;color:var(--muted)}
+  .tab.active{background:var(--panel);color:var(--accent);border-bottom-color:var(--panel);font-weight:600}
+  .tab .c{font-size:11px;background:var(--line);border-radius:10px;padding:0 6px;margin-left:5px}
+  /* table */
+  .tblwrap{overflow:auto;max-height:560px;border:1px solid var(--line);border-radius:8px}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{position:sticky;top:0;background:var(--panel2);z-index:1;font-weight:600;color:var(--accent2)}
+  tbody tr:hover{background:var(--panel2)}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .pill{font-size:11px;padding:2px 8px;border-radius:10px}
+  .pill.dead{background:#7f1d1d;color:#fecaca}
+  .pill.stuck{background:#78350f;color:#fed7aa}
+  .pill.review{background:#1e3a8a;color:#dbeafe}
+  .pill.anom{background:#831843;color:#fbcfe8}
+  .search{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:7px 10px;font-size:13px;width:260px;margin-bottom:10px}
+  .muted{color:var(--muted)}
+  .hidden{display:none}
+  .empty{padding:30px;text-align:center;color:var(--muted)}
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:720px;width:100%;max-height:82vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+  .modal-h{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--panel)}
+  .modal-h h3{margin:0;font-size:17px}
+  .modal-b{padding:16px 20px}
+  .alert-box{border-radius:10px;padding:12px 14px;margin-bottom:12px}
+  .alert-red{background:#3b0a0a;border:1px solid #7f1d1d}
+  .alert-amber{background:#3a2a06;border:1px solid #a16207}
+  .close{cursor:pointer;font-size:22px;color:var(--muted);border:none;background:none}
+  .note{font-size:12px;color:var(--muted);margin-top:6px}
+  a.link{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🧮 ระบบคำนวณอัจฉริยะเพื่อการจัดซื้อและขจัดสินค้าค้างสต็อก</h1>
+  <p>ร้านเครื่องเขียน / เครื่องใช้สำนักงาน · วิเคราะห์จากไฟล์ Excel (POSPOS) · ข้อมูลไม่ถูกเก็บ ประมวลผลในเครื่องเท่านั้น</p>
+</header>
+<div class="wrap">
+
+  <!-- STEP 1: UPLOAD -->
+  <div class="card">
+    <h2>1) อัปโหลดไฟล์ (อัปได้หลายไฟล์พร้อมกัน)</h2>
+    <div id="drop">
+      <div style="font-size:34px">📁</div>
+      <div>ลากไฟล์มาวางที่นี่ หรือ <b>คลิกเพื่อเลือกไฟล์</b></div>
+      <div class="note">รองรับ .xlsx / .csv · ระบบแยกประเภทจากชื่อไฟล์: <b>report_by_product</b> = ยอดขาย · <b>export_product_all</b> = สต็อก · <b>export_purchase</b> = PO · <b>festival/ปฏิทิน</b> = เทศกาล</div>
+      <input id="fileInput" type="file" multiple accept=".xlsx,.xls,.csv" class="hidden">
+    </div>
+    <div id="fileList" class="filelist"></div>
+  </div>
+
+  <!-- STEP 2: SETTINGS -->
+  <div class="card">
+    <h2>2) ตั้งค่าการคำนวณ</h2>
+    <div class="settings">
+      <div class="fld">
+        <label>เดือนเป้าหมาย (วางแผนสั่งของเดือนไหน)</label>
+        <select id="targetMonth"></select>
+      </div>
+      <div class="fld">
+        <label>% เผื่อการเติบโต</label>
+        <input id="growth" type="number" value="15" min="0" max="200" step="1" style="width:100px">
+      </div>
+      <div class="fld">
+        <label>อันดับขายดี: ตั้งแต่เดือน</label>
+        <select id="bsFrom"></select>
+      </div>
+      <div class="fld">
+        <label>ถึงเดือน</label>
+        <select id="bsTo"></select>
+      </div>
+      <button class="run" id="runBtn">▶ ประมวลผล</button>
+      <button class="ghost" id="exportBtn" disabled>⬇ Export ผลลัพธ์ (Excel)</button>
+    </div>
+    <div class="note" id="dataSummary"></div>
+  </div>
+
+  <!-- STEP 3: RESULTS -->
+  <div id="results" class="hidden">
+    <div class="card">
+      <h2>3) สรุปภาพรวม</h2>
+      <div class="kpis" id="kpis"></div>
+    </div>
+
+    <div class="card">
+      <div class="tabs" id="tabs"></div>
+      <input class="search" id="search" placeholder="🔍 ค้นหา รหัส/ชื่อสินค้า...">
+      <div id="tableArea"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ALERT MODAL -->
+<div id="overlay" class="overlay hidden">
+  <div class="modal">
+    <div class="modal-h"><h3>🔔 แจ้งเตือน</h3><button class="close" id="closeModal">&times;</button></div>
+    <div class="modal-b" id="modalBody"></div>
+  </div>
+</div>
+
+<script>
+/* ================= ปฏิทินเทศกาลเริ่มต้น (แก้ได้โดยอัปไฟล์ทับ) =================
+   month = เดือนที่เกิดเทศกาล, ระบบเตือนล่วงหน้า 1 เดือน */
+let FESTIVALS = [
+  {name:"เปิดเทอม เทอม 1", month:5,  keywords:["ปากกา","ดินสอ","สมุด","ไม้บรรทัด","ยางลบ","กระเป๋า","ดินน้ำมัน","สีไม้","กบเหลา"]},
+  {name:"เปิดเทอม เทอม 2", month:11, keywords:["ปากกา","ดินสอ","สมุด","ไม้บรรทัด","ยางลบ","สีไม้","แฟ้ม"]},
+  {name:"เข้าพรรษา",       month:7,  keywords:["เทียน","สังฆทาน","จีวร","ธูป"]},
+  {name:"ปีใหม่",          month:1,  keywords:["ปฏิทิน","ไดอารี่","การ์ด","สมุดโน้ต","ของขวัญ"]},
+  {name:"ตรุษจีน",         month:2,  keywords:["ธูป","เทียน","ซองแดง","อั่งเปา"]},
+  {name:"สงกรานต์",        month:4,  keywords:["ปืนฉีดน้ำ","แป้ง"]},
+  {name:"ลอยกระทง",        month:11, keywords:["กระทง","ธูป","เทียน"]},
+];
+
+const THMONTHS=["","มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+const PO_EXCLUDE="พีโอ";
+const store={sales:{}, stock:null, po:{}, files:[]};   // sales: {code:{name,category,byMonth:{'YYYY-MM':qty},...}}
+let lastResult=null;
+
+/* ---------- file type detection from filename ---------- */
+function detectType(fn){
+  const n=fn.toLowerCase();
+  if(n.startsWith("report_by_product")) return "sales";
+  if(n.startsWith("export_product_all")) return "stock";
+  if(n.startsWith("export_purchase"))   return "po";
+  if(n.includes("festival")||n.includes("ปฏิทิน")||n.includes("เทศกาล")||n.includes("calendar")) return "festival";
+  return "unknown";
+}
+/* parse YYYY_MM (year-first) else DD_MM_YYYY -> {y,m,key} */
+function parsePeriod(fn){
+  let m=fn.match(/(20\d{2})[_\-.](\d{1,2})(?!\d)/);          // YYYY_MM
+  if(m){let y=+m[1],mo=+m[2]; if(mo>=1&&mo<=12) return {y,m:mo,key:y+"-"+String(mo).padStart(2,"0")};}
+  m=fn.match(/(\d{1,2})[_\-.](\d{1,2})[_\-.](20\d{2})/);      // DD_MM_YYYY
+  if(m){let mo=+m[2],y=+m[3]; if(mo>=1&&mo<=12) return {y,m:mo,key:y+"-"+String(mo).padStart(2,"0")};}
+  return null;
+}
+function norm(s){return (s==null?"":String(s)).trim();}
+function toNum(v){if(v==null||v==="")return 0;const n=parseFloat(String(v).replace(/,/g,""));return isNaN(n)?0:n;}
+
+/* ---------- read a workbook file ---------- */
+function readFile(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:"array"});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
+        res(rows);
+      }catch(err){rej(err);}
+    };
+    r.onerror=rej;
+    r.readAsArrayBuffer(file);
+  });
+}
+
+/* ---------- ingest by type ---------- */
+function ingestSales(rows,period){
+  if(!period) return {ok:false,msg:"ไม่พบเดือน/ปีในชื่อไฟล์"};
+  // header: Product code, Product name, Category, Balance, Sold, Total, Avg(cost), Avg(sell), Net profit
+  let count=0;
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i]; const code=norm(r[0]); if(!code) continue;
+    const name=norm(r[1]), cat=norm(r[2]);
+    const sold=toNum(r[4]), cost=toNum(r[6]), sell=toNum(r[7]);
+    if(!store.sales[code]) store.sales[code]={name,category:cat,byMonth:{},cost:0,sell:0};
+    const s=store.sales[code];
+    s.name=s.name||name; if(cat) s.category=cat;
+    s.byMonth[period.key]=(s.byMonth[period.key]||0)+sold;
+    if(cost) s.cost=cost; if(sell) s.sell=sell;
+    count++;
+  }
+  return {ok:true,rows:count};
+}
+function ingestStock(rows){
+  // header: Product code, Product name, Product subname, Category, Quantity, Unit, ... Cost, Price, Notify...
+  store.stock={};
+  let count=0;
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i]; const code=norm(r[0]); if(!code) continue;
+    store.stock[code]={
+      name:norm(r[1]), category:norm(r[3]),
+      qty:toNum(r[4]), unit:norm(r[5]),
+      cost:toNum(r[7]), price:toNum(r[8]), notify:toNum(r[9])
+    };
+    count++;
+  }
+  return {ok:true,rows:count};
+}
+function ingestPO(rows){
+  // nested: header row has po_code(col0) + create_date(col3); line row has code(col1),qty(col3),cost(col4)
+  let curDate=null,count=0;
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i]; const c0=norm(r[0]), c1=norm(r[1]);
+    if(c1==="product_code") continue;           // secondary header
+    if(c0){ curDate=norm(r[3]); continue; }      // PO header row -> capture create_date
+    if(c1){                                       // line item
+      const code=c1, qty=toNum(r[3]), cost=toNum(r[4]);
+      if(!store.po[code]) store.po[code]={imported:0,cost:0,dates:[]};
+      store.po[code].imported+=qty;
+      if(cost) store.po[code].cost=cost;
+      if(curDate) store.po[code].dates.push(curDate);
+      count++;
+    }
+  }
+  return {ok:true,rows:count};
+}
+function ingestFestival(rows){
+  const out=[];
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i]; const name=norm(r[0]); const month=parseInt(norm(r[1]),10);
+    const kw=norm(r[2]).split(/[,،]/).map(s=>s.trim()).filter(Boolean);
+    if(name&&month>=1&&month<=12) out.push({name,month,keywords:kw});
+  }
+  if(out.length){FESTIVALS=out; return {ok:true,rows:out.length};}
+  return {ok:false,msg:"อ่านปฏิทินไม่ได้ (ต้องมีคอลัมน์ ชื่อเทศกาล/เดือน/คำค้น)"};
+}
+
+/* ---------- month picklists ---------- */
+function allSalesMonths(){
+  const set=new Set();
+  Object.values(store.sales).forEach(s=>Object.keys(s.byMonth).forEach(k=>set.add(k)));
+  return [...set].sort();
+}
+
+/* ================= CORE CALCULATION ================= */
+function isPO(cat){return cat && cat.indexOf(PO_EXCLUDE)>=0;}
+
+function compute(targetM,growthPct){
+  const months=allSalesMonths();
+  const nMonths=Math.max(months.length,1);
+  const growth=1+(growthPct/100);
+  const nowY=new Date().getFullYear();
+  // union of product codes across sales/stock/po
+  const codes=new Set([...Object.keys(store.sales),...Object.keys(store.stock||{}),...Object.keys(store.po)]);
+
+  const res={reorder:[],dead:[],stuck:[],review:[],anomaly:[],stuckValue:0};
+
+  codes.forEach(code=>{
+    const sa=store.sales[code], st=store.stock?store.stock[code]:null, po=store.po[code];
+    const category=(st&&st.category)||(sa&&sa.category)||"";
+    if(isPO(category)) return;                      // M12 exclude พีโอ
+
+    const name=(st&&st.name)||(sa&&sa.name)||"";
+    const cost=(st&&st.cost)||(po&&po.cost)||(sa&&sa.cost)||0;
+
+    // ---- current stock + anomaly rules ----
+    let rawQty = st? st.qty : null;
+    let stockKnown = st!=null;
+    let anomaly=false, qty=0;
+    if(stockKnown){
+      if(rawQty<0){anomaly=true;}                   // 13.1(ค) negative -> flag
+      qty=rawQty<0?rawQty:Math.ceil(rawQty);        // 13.2(ก) fractional -> round up
+    }
+
+    // ---- sales aggregates ----
+    let soldTotal=0, lastSaleKey=null;
+    const byMonth=sa?sa.byMonth:{};
+    Object.keys(byMonth).forEach(k=>{soldTotal+=byMonth[k]; if(byMonth[k]>0&&(!lastSaleKey||k>lastSaleKey)) lastSaleKey=k;});
+    const avgMonthly=soldTotal/nMonths;
+
+    // ---- target-month forecast (same month, last 3 years) ----
+    const sameMonthVals=[];
+    Object.keys(byMonth).forEach(k=>{const mm=+k.split("-")[1]; if(mm===targetM) sameMonthVals.push({y:+k.split("-")[0],v:byMonth[k]});});
+    sameMonthVals.sort((a,b)=>b.y-a.y);
+    const last3=sameMonthVals.slice(0,3);
+    const hasHistory=last3.length>0;
+    const avgTarget=hasHistory? last3.reduce((s,x)=>s+x.v,0)/last3.length : 0;
+
+    // ---- imported total & months since last sale ----
+    const imported=po?po.imported:0;
+    let monthsSince=999;
+    if(lastSaleKey){const[ly,lm]=lastSaleKey.split("-").map(Number); monthsSince=(nowY-ly)*12+((new Date().getMonth()+1)-lm);}
+
+    // ---- Months of Supply ----
+    let mos = avgMonthly>0 ? qty/avgMonthly : (qty>0?Infinity:0);
+
+    const base={code,name,category,qty:stockKnown?qty:null,rawQty,cost,soldTotal,avgMonthly,imported,
+                avgTarget,mos,monthsSince,lastSale:lastSaleKey||"-"};
+
+    // ---- anomaly bucket (negative stock) -> แยกไว้ตรวจ ไม่นำไปคำนวณต่อ (13.1 ค) ----
+    if(anomaly){ res.anomaly.push({...base,reason:"สต็อกติดลบ ("+rawQty+")"}); return; }
+
+    // ---- incomplete data: appears in sales/PO but not in stock file (25 ข) ----
+    if(!stockKnown){
+      res.review.push({...base,reason:"ไม่มีข้อมูลสต็อก (มีในยอดขาย/PO)"});
+      return;
+    }
+
+    // ---- Dead Stock (M4) ----
+    let isDead=false, deadReason="";
+    if(soldTotal===0 && qty>0 && (imported>0 || true)){
+      isDead=true; deadReason="มีของแต่ไม่เคยขาย";     // 26(ค)
+    } else if(imported>0){
+      const pctSold=soldTotal/imported;
+      if(pctSold<0.60 && monthsSince>6){isDead=true; deadReason="ขาย "+(pctSold*100).toFixed(0)+"% (<60%) และไม่ขาย "+monthsSince+" เดือน";}
+    }
+    if(isDead){ res.dead.push({...base,reason:deadReason, pctSold:imported>0?(soldTotal/imported):0}); }
+
+    // ---- Stuck money (M6): MoS > 6 ----
+    if(qty>0 && mos>6){
+      const val=qty*cost; res.stuck.push({...base,value:val}); res.stuckValue+=val;
+    }
+
+    // ---- Reorder recommendation (M2) ----
+    if(!hasHistory){
+      if(soldTotal>0) res.review.push({...base,reason:"ไม่มีประวัติขายเดือน "+THMONTHS[targetM]+" ในปีก่อน — รอพิจารณา"});  // M10 (เฉพาะที่เคยมียอดขาย)
+    } else {
+      const rec=Math.ceil(avgTarget*growth - qty);
+      if(rec>0) res.reorder.push({...base,recommend:rec});
+    }
+  });
+
+  res.reorder.sort((a,b)=>b.recommend-a.recommend);
+  res.dead.sort((a,b)=>b.qty*b.cost-a.qty*a.cost);
+  res.stuck.sort((a,b)=>b.value-a.value);
+  return res;
+}
+
+/* ---------- best sellers (M7) over selected range ---------- */
+function bestSellers(fromKey,toKey){
+  const list=[];
+  Object.keys(store.sales).forEach(code=>{
+    const s=store.sales[code];
+    const cat=(store.stock&&store.stock[code]?store.stock[code].category:s.category)||"";
+    if(isPO(cat)) return;
+    let sum=0;
+    Object.keys(s.byMonth).forEach(k=>{ if((!fromKey||k>=fromKey)&&(!toKey||k<=toKey)) sum+=s.byMonth[k]; });
+    if(sum>0) list.push({code,name:s.name,category:cat,sold:sum});
+  });
+  list.sort((a,b)=>b.sold-a.sold);
+  return list;
+}
+
+/* ================= RENDER ================= */
+function fmt(n){return (n||0).toLocaleString("th-TH",{maximumFractionDigits:0});}
+function fmtM(n){return (n||0).toLocaleString("th-TH",{maximumFractionDigits:1});}
+function money(n){return (n||0).toLocaleString("th-TH",{maximumFractionDigits:0})+" ฿";}
+
+let currentTab="reorder";
+function render(res,best){
+  document.getElementById("results").classList.remove("hidden");
+  // KPIs
+  document.getElementById("kpis").innerHTML=`
+    <div class="kpi red"><div class="l">💰 มูลค่าสต็อกที่จม</div><div class="n">${money(res.stuckValue)}</div></div>
+    <div class="kpi green"><div class="l">🛒 รายการควรสั่งซื้อ</div><div class="n">${fmt(res.reorder.length)}</div></div>
+    <div class="kpi amber"><div class="l">⚠️ Dead Stock</div><div class="n">${fmt(res.dead.length)}</div></div>
+    <div class="kpi purple"><div class="l">🕓 ของค้าง (MoS>6)</div><div class="n">${fmt(res.stuck.length)}</div></div>
+    <div class="kpi blue"><div class="l">📋 รอพิจารณา / ข้อมูลไม่ครบ</div><div class="n">${fmt(res.review.length)}</div></div>
+    <div class="kpi"><div class="l">🔴 ข้อมูลผิดปกติ</div><div class="n">${fmt(res.anomaly.length)}</div></div>`;
+  // tabs
+  const tabDefs=[
+    ["reorder","🛒 ควรสั่งซื้อ",res.reorder.length],
+    ["best","🏆 ขายดี",best.length],
+    ["dead","⚠️ Dead Stock",res.dead.length],
+    ["stuck","🕓 เงินจม",res.stuck.length],
+    ["review","📋 รอพิจารณา",res.review.length],
+    ["anomaly","🔴 ผิดปกติ",res.anomaly.length],
+  ];
+  document.getElementById("tabs").innerHTML=tabDefs.map(t=>
+    `<div class="tab ${t[0]===currentTab?'active':''}" data-tab="${t[0]}">${t[1]}<span class="c">${fmt(t[2])}</span></div>`).join("");
+  document.querySelectorAll(".tab").forEach(el=>el.onclick=()=>{currentTab=el.dataset.tab;renderTable(res,best);renderTabsActive();});
+  renderTable(res,best);
+}
+function renderTabsActive(){document.querySelectorAll(".tab").forEach(el=>el.classList.toggle("active",el.dataset.tab===currentTab));}
+
+function tableHTML(cols,rows,rowFn){
+  if(!rows.length) return `<div class="empty">— ไม่มีรายการ —</div>`;
+  return `<div class="tblwrap"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(rowFn).join("")}</tbody></table></div>`;
+}
+function renderTable(res,best){
+  const q=(document.getElementById("search").value||"").toLowerCase().trim();
+  const flt=arr=>q?arr.filter(r=>(r.code+" "+r.name).toLowerCase().includes(q)):arr;
+  const area=document.getElementById("tableArea");
+  let html="";
+  if(currentTab==="reorder"){
+    html=tableHTML(["รหัส","ชื่อสินค้า","หมวด","คงเหลือ","เฉลี่ยเดือนเป้าหมาย(3ปี)","แนะนำให้สั่ง"],flt(res.reorder),r=>
+      `<tr><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.category}</td>
+       <td class="num">${fmt(r.qty)}</td><td class="num">${fmtM(r.avgTarget)}</td>
+       <td class="num" style="color:var(--green);font-weight:700">${fmt(r.recommend)}</td></tr>`);
+  } else if(currentTab==="best"){
+    html=tableHTML(["อันดับ","รหัส","ชื่อสินค้า","หมวด","ขายได้(ชิ้น)"],flt(best).slice(0,500),(r,i)=>
+      `<tr><td class="num">${i+1}</td><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.category}</td>
+       <td class="num" style="font-weight:700">${fmt(r.sold)}</td></tr>`);
+  } else if(currentTab==="dead"){
+    html=tableHTML(["รหัส","ชื่อสินค้า","คงเหลือ","นำเข้า","%ขาย","ไม่ขาย(เดือน)","มูลค่าจม","เหตุผล"],flt(res.dead),r=>
+      `<tr><td>${r.code}</td><td>${r.name}</td><td class="num">${fmt(r.qty)}</td><td class="num">${fmt(r.imported)}</td>
+       <td class="num">${(r.pctSold*100).toFixed(0)}%</td><td class="num">${r.monthsSince>900?'∞':r.monthsSince}</td>
+       <td class="num">${money(r.qty*r.cost)}</td><td><span class="pill dead">${r.reason}</span></td></tr>`);
+  } else if(currentTab==="stuck"){
+    html=tableHTML(["รหัส","ชื่อสินค้า","คงเหลือ","ขายเฉลี่ย/เดือน","อยู่ได้(เดือน)","มูลค่าจม"],flt(res.stuck),r=>
+      `<tr><td>${r.code}</td><td>${r.name}</td><td class="num">${fmt(r.qty)}</td><td class="num">${fmtM(r.avgMonthly)}</td>
+       <td class="num">${r.mos===Infinity?'∞':fmtM(r.mos)}</td><td class="num" style="color:var(--amber)">${money(r.value)}</td></tr>`);
+  } else if(currentTab==="review"){
+    html=tableHTML(["รหัส","ชื่อสินค้า","คงเหลือ","เหตุผล"],flt(res.review),r=>
+      `<tr><td>${r.code}</td><td>${r.name}</td><td class="num">${r.qty==null?'-':fmt(r.qty)}</td>
+       <td><span class="pill review">${r.reason}</span></td></tr>`);
+  } else if(currentTab==="anomaly"){
+    html=tableHTML(["รหัส","ชื่อสินค้า","หมวด","เหตุผล"],flt(res.anomaly),r=>
+      `<tr><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.category}</td>
+       <td><span class="pill anom">${r.reason}</span></td></tr>`);
+  }
+  area.innerHTML=html;
+}
+
+/* ---------- alerts modal (M8 + M9) ---------- */
+function buildAlerts(res,best){
+  const parts=[];
+  // M8: best-seller Top20% AND MoS<1
+  const cut=Math.max(1,Math.ceil(best.length*0.20));   // Top 20%
+  const months=allSalesMonths().length||1;
+  const lowStock=[];
+  best.slice(0,cut).forEach(b=>{
+    const st=store.stock?store.stock[b.code]:null; if(!st)return;
+    const qty=st.qty<0?st.qty:Math.ceil(st.qty);
+    const sa=store.sales[b.code];
+    const avg=sa? Object.values(sa.byMonth).reduce((s,v)=>s+v,0)/months : 0;
+    const mos=avg>0?qty/avg:(qty>0?Infinity:0);
+    if(mos<1) lowStock.push({...b,qty,mos});
+  });
+  if(lowStock.length){
+    parts.push(`<div class="alert-box alert-red"><b>🔥 สินค้าขายดีแต่ใกล้หมด (${lowStock.length} รายการ)</b>
+      <div class="note">อยู่ใน Top 20% ขายดี และของเหลือขายได้ไม่ถึง 1 เดือน — ควรรีบสั่ง</div>
+      <ul>${lowStock.slice(0,25).map(x=>`<li>${x.name} <span class="muted">(คงเหลือ ${fmt(x.qty)}, ขายได้อีก ${x.mos===Infinity?'∞':fmtM(x.mos)} เดือน)</span></li>`).join("")}</ul></div>`);
+  }
+  // M9: festivals next month
+  const nextMonth=(new Date().getMonth()+2>12)?1:new Date().getMonth()+2;
+  const upFest=FESTIVALS.filter(f=>f.month===nextMonth);
+  upFest.forEach(f=>{
+    const matched=[];
+    Object.keys(store.stock||{}).forEach(code=>{
+      const st=store.stock[code]; if(isPO(st.category))return;
+      if(f.keywords.some(k=>k&&st.name.includes(k))) matched.push(st.name);
+    });
+    parts.push(`<div class="alert-box alert-amber"><b>📅 ใกล้ถึงเทศกาล "${f.name}" (เดือน ${THMONTHS[f.month]})</b>
+      <div class="note">เตือนล่วงหน้า 1 เดือน · คำค้น: ${f.keywords.join(", ")||"-"}</div>
+      ${matched.length?`<div class="note">พบสินค้าที่เกี่ยวข้อง ${matched.length} รายการ เช่น: ${matched.slice(0,12).join(", ")}${matched.length>12?" ...":""}</div>`
+        :`<div class="note">ไม่พบสินค้าที่ตรงคำค้นในสต็อก</div>`}</div>`);
+  });
+  return parts.join("");
+}
+function showModal(html){
+  if(!html){document.getElementById("overlay").classList.add("hidden");return;}
+  document.getElementById("modalBody").innerHTML=html;
+  document.getElementById("overlay").classList.remove("hidden");
+}
+
+/* ---------- Export (M11) ---------- */
+function exportExcel(res,best){
+  const wb=XLSX.utils.book_new();
+  const s1=res.reorder.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,หมวด:r.category,คงเหลือ:r.qty,"เฉลี่ยเดือนเป้าหมาย(3ปี)":+r.avgTarget.toFixed(1),แนะนำให้สั่ง:r.recommend}));
+  const s2=best.map((r,i)=>({อันดับ:i+1,รหัส:r.code,ชื่อสินค้า:r.name,หมวด:r.category,ขายได้ชิ้น:r.sold}));
+  const s3=res.dead.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,คงเหลือ:r.qty,นำเข้า:r.imported,"%ขาย":+(r.pctSold*100).toFixed(0),ไม่ขายกี่เดือน:r.monthsSince>900?"":r.monthsSince,มูลค่าจม:+(r.qty*r.cost).toFixed(0),เหตุผล:r.reason}));
+  const s4=res.stuck.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,คงเหลือ:r.qty,ขายเฉลี่ยต่อเดือน:+r.avgMonthly.toFixed(1),อยู่ได้กี่เดือน:r.mos===Infinity?"∞":+r.mos.toFixed(1),มูลค่าจม:+r.value.toFixed(0)}));
+  const s5=res.review.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,คงเหลือ:r.qty,เหตุผล:r.reason}));
+  const s6=res.anomaly.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,หมวด:r.category,เหตุผล:r.reason}));
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s1),"ควรสั่งซื้อ");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s2),"ขายดี");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s3),"DeadStock");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s4),"เงินจม");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s5),"รอพิจารณา");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s6),"ผิดปกติ");
+  const d=new Date();
+  XLSX.writeFile(wb,`ผลวิเคราะห์จัดซื้อ_${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.xlsx`);
+}
+
+/* ================= UI WIRING ================= */
+const drop=document.getElementById("drop"), fileInput=document.getElementById("fileInput");
+drop.onclick=()=>fileInput.click();
+["dragover","dragenter"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("hover");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("hover");}));
+drop.addEventListener("drop",e=>handleFiles(e.dataTransfer.files));
+fileInput.addEventListener("change",e=>handleFiles(e.target.files));
+
+async function handleFiles(fileList){
+  for(const f of fileList){
+    const type=detectType(f.name);
+    const period=parsePeriod(f.name);
+    let info={file:f.name,type,period,status:"กำลังอ่าน..."};
+    store.files.push(info);
+    renderFileList();
+    try{
+      const rows=await readFile(f);
+      let r;
+      if(type==="sales")   r=ingestSales(rows,period);
+      else if(type==="stock") r=ingestStock(rows);
+      else if(type==="po")    r=ingestPO(rows);
+      else if(type==="festival") r=ingestFestival(rows);
+      else r={ok:false,msg:"ไม่รู้จักประเภทไฟล์ (ดูจากชื่อไฟล์)"};
+      info.status=r.ok?("✓ อ่านสำเร็จ "+(r.rows||0)+" แถว"+(period?(" · "+THMONTHS[period.m]+" "+period.y):"")):("✗ "+r.msg);
+      info.ok=r.ok;
+    }catch(err){info.status="✗ อ่านไฟล์ไม่ได้: "+err.message; info.ok=false;}
+    renderFileList(); refreshMonthPickers(); updateSummary();
+  }
+}
+function renderFileList(){
+  const badge={sales:["b-sales","ยอดขาย"],stock:["b-stock","สต็อก"],po:["b-po","PO"],festival:["b-fest","เทศกาล"],unknown:["b-unk","ไม่รู้จัก"]};
+  document.getElementById("fileList").innerHTML=store.files.map(f=>{
+    const b=badge[f.type];
+    return `<div class="fitem"><span><span class="badge ${b[0]}">${b[1]}</span> &nbsp;${f.file}</span><span class="muted">${f.status||""}</span></div>`;
+  }).join("");
+}
+function refreshMonthPickers(){
+  const months=allSalesMonths();
+  const opts=months.map(k=>{const[y,m]=k.split("-");return `<option value="${k}">${THMONTHS[+m]} ${y}</option>`;}).join("");
+  const bf=document.getElementById("bsFrom"), bt=document.getElementById("bsTo");
+  if(months.length){bf.innerHTML=opts; bt.innerHTML=opts; bf.value=months[Math.max(0,months.length-12)]; bt.value=months[months.length-1];}
+}
+function updateSummary(){
+  const nS=Object.keys(store.sales).length, nMonths=allSalesMonths().length;
+  const nStock=store.stock?Object.keys(store.stock).length:0, nPO=Object.keys(store.po).length;
+  document.getElementById("dataSummary").innerHTML=
+    `ยอดขาย: <b>${nS}</b> สินค้า / <b>${nMonths}</b> เดือน · สต็อก: <b>${nStock}</b> สินค้า · PO: <b>${nPO}</b> สินค้า · เทศกาล: <b>${FESTIVALS.length}</b> รายการ`;
+}
+
+/* month select (target) */
+(function initTarget(){
+  const sel=document.getElementById("targetMonth");
+  sel.innerHTML=THMONTHS.slice(1).map((m,i)=>`<option value="${i+1}">${m}</option>`).join("");
+  sel.value=new Date().getMonth()+1;
+})();
+
+document.getElementById("runBtn").onclick=()=>{
+  if(!store.stock){alert("กรุณาอัปโหลดไฟล์สต็อก (export_product_all...) ก่อน");return;}
+  if(allSalesMonths().length===0){alert("กรุณาอัปโหลดไฟล์ยอดขาย (report_by_product_YYYY_MM...) อย่างน้อย 1 ไฟล์");return;}
+  const targetM=+document.getElementById("targetMonth").value;
+  const growth=+document.getElementById("growth").value||0;
+  const res=compute(targetM,growth);
+  const best=bestSellers(document.getElementById("bsFrom").value,document.getElementById("bsTo").value);
+  lastResult={res,best};
+  render(res,best);
+  document.getElementById("exportBtn").disabled=false;
+  const alerts=buildAlerts(res,best);
+  if(alerts) showModal(alerts);
+};
+document.getElementById("search").addEventListener("input",()=>{if(lastResult)renderTable(lastResult.res,lastResult.best);});
+document.getElementById("exportBtn").onclick=()=>{if(lastResult)exportExcel(lastResult.res,lastResult.best);};
+document.getElementById("closeModal").onclick=()=>showModal(null);
+document.getElementById("overlay").addEventListener("click",e=>{if(e.target.id==="overlay")showModal(null);});
+updateSummary();
+</script>
+</body>
+</html>
