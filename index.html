@@ -102,6 +102,17 @@
   details.guide code{background:var(--bg);padding:1px 6px;border-radius:4px;color:var(--accent2);font-size:12px}
   details.guide .ex{background:var(--bg);border-radius:6px;padding:10px 12px;font-family:Consolas,monospace;font-size:12px;white-space:pre;overflow:auto;color:#cbd5e1}
   .gwarn{background:#3a2a06;border:1px solid #a16207;border-radius:8px;padding:8px 12px;margin-top:8px;font-size:12.5px;color:#fde68a}
+  /* คลังข้อมูล */
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .chip{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:4px 11px;font-size:12px;display:inline-flex;align-items:center;gap:7px}
+  .chip b{color:var(--accent2);font-weight:600}
+  .chip .x{cursor:pointer;color:var(--muted);font-size:13px}
+  .chip .x:hover{color:var(--red)}
+  .vrow{margin-bottom:12px}
+  .vrow .lbl{font-size:13px;color:var(--muted)}
+  .pill.good{background:#14532d;color:#bbf7d0}
+  .pill.mid{background:#78350f;color:#fed7aa}
+  .pill.bad2{background:#7f1d1d;color:#fecaca}
 </style>
 </head>
 <body>
@@ -148,6 +159,19 @@ festival_calendar.xlsx           ← ปฏิทินเทศกาล</div>
         ⚠️ สต็อกใช้ไฟล์เดียว · อย่าอัปยอดขายเดือนเดียวกันซ้ำ (ยอดจะถูกบวกซ้ำ)</div>
       </div>
     </details>
+  </div>
+
+  <!-- คลังข้อมูลที่จำไว้ -->
+  <div class="card">
+    <h2>🗄️ คลังข้อมูลที่จำไว้ (เดือนถัดไปอัปแค่เดือนใหม่ ไม่ต้องอัปย้อนหลังซ้ำ)</h2>
+    <div id="vault"></div>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="ghost" id="backupBtn">💾 สำรองเป็นไฟล์</button>
+      <button class="ghost" id="restoreBtn">📂 กู้คืนจากไฟล์</button>
+      <button class="ghost" id="clearBtn" style="border-color:#7f1d1d;color:#fca5a5">🗑 ล้างคลังข้อมูลทั้งหมด</button>
+      <input id="restoreInput" type="file" accept=".json,application/json" class="hidden">
+    </div>
+    <div class="note">ข้อมูลถูกจำไว้ในเบราว์เซอร์เครื่องนี้เท่านั้น (ไม่ได้ส่งขึ้นเซิร์ฟเวอร์) · ถ้าจะย้ายเครื่องหรือกลัวแคชถูกล้าง ให้กด "สำรองเป็นไฟล์" เก็บไว้</div>
   </div>
 
   <!-- STEP 2: SETTINGS -->
@@ -215,8 +239,37 @@ let FESTIVALS = DEFAULT_FESTIVALS.slice();
 
 const THMONTHS=["","มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
 const PO_EXCLUDE="พีโอ";
-const store={sales:{}, stock:null, po:{}, files:[]};   // sales: {code:{name,category,byMonth:{'YYYY-MM':qty},...}}
+const store={sales:{}, stock:null, po:{}, files:[]};   // derived per-session view used by compute()
 let lastResult=null;
+
+/* ============ คลังข้อมูลถาวร (localStorage) ============
+   DB.sales[code] = {n:ชื่อ, c:หมวด, co:ทุน, m:{'YYYY-MM':จำนวนที่ขาย}}
+   DB.po[code]    = {n:ชื่อ, co:ทุน, m:{'YYYY-MM':จำนวนที่นำเข้า}}
+   DB.poDocs[po_code] = 'YYYY-MM'   ← กันนับซ้ำเมื่ออัปไฟล์ PO ใบเดิมอีกรอบ */
+const LS_KEY="smartstock_db_v1";
+let DB={sales:{},po:{},poDocs:{}};
+function loadDB(){
+  try{const s=localStorage.getItem(LS_KEY); if(s){const d=JSON.parse(s); DB={sales:d.sales||{},po:d.po||{},poDocs:d.poDocs||{}};}}
+  catch(e){console.warn("โหลดคลังข้อมูลไม่ได้",e);}
+}
+function saveDB(){
+  try{localStorage.setItem(LS_KEY,JSON.stringify(DB)); return true;}
+  catch(e){console.warn("บันทึกคลังข้อมูลไม่ได้",e); return false;}
+}
+function dbSalesMonths(){const s=new Set();Object.values(DB.sales).forEach(p=>Object.keys(p.m).forEach(k=>s.add(k)));return [...s].sort();}
+function dbPoMonths(){const s=new Set();Object.values(DB.po).forEach(p=>Object.keys(p.m).forEach(k=>s.add(k)));return [...s].sort();}
+function monthLabel(k){const[y,m]=k.split("-");return THMONTHS[+m]+" "+y;}
+/* วันที่จาก PO เช่น "06/07/2026" -> "2026-07" */
+function monthKeyFromDate(v){
+  if(v==null||v==="") return null;
+  if(v instanceof Date) return v.getFullYear()+"-"+String(v.getMonth()+1).padStart(2,"0");
+  const s=String(v).trim();
+  let m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);          // DD/MM/YYYY
+  if(m) return m[3]+"-"+String(+m[2]).padStart(2,"0");
+  m=s.match(/^(\d{4})[\/\-.](\d{1,2})/);                              // YYYY-MM-DD
+  if(m) return m[1]+"-"+String(+m[2]).padStart(2,"0");
+  return null;
+}
 
 /* ---------- file type detection from filename ---------- */
 function detectType(fn){
@@ -256,19 +309,19 @@ function readFile(file){
 }
 
 /* ---------- ingest by type ---------- */
-function ingestSales(rows,period){
-  if(!period) return {ok:false,msg:"ไม่พบเดือน/ปีในชื่อไฟล์"};
+/* ยอดขาย: ข้อมูลของเดือนนั้น "แทนที่" ของเดิม (อัปไฟล์เดือนเดิมซ้ำจึงไม่บวกซ้ำ) */
+function mergeSales(rows,key){
   // header: Product code, Product name, Category, Balance, Sold, Total, Avg(cost), Avg(sell), Net profit
+  Object.values(DB.sales).forEach(p=>{ delete p.m[key]; });
   let count=0;
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; const code=norm(r[0]); if(!code) continue;
     const name=norm(r[1]), cat=norm(r[2]);
-    const sold=toNum(r[4]), cost=toNum(r[6]), sell=toNum(r[7]);
-    if(!store.sales[code]) store.sales[code]={name,category:cat,byMonth:{},cost:0,sell:0};
-    const s=store.sales[code];
-    s.name=s.name||name; if(cat) s.category=cat;
-    s.byMonth[period.key]=(s.byMonth[period.key]||0)+sold;
-    if(cost) s.cost=cost; if(sell) s.sell=sell;
+    const sold=toNum(r[4]), cost=toNum(r[6]);
+    if(!DB.sales[code]) DB.sales[code]={n:name,c:cat,co:0,m:{}};
+    const s=DB.sales[code];
+    if(name) s.n=name; if(cat) s.c=cat; if(cost) s.co=cost;
+    s.m[key]=(s.m[key]||0)+sold;
     count++;
   }
   return {ok:true,rows:count};
@@ -288,23 +341,30 @@ function ingestStock(rows){
   }
   return {ok:true,rows:count};
 }
-function ingestPO(rows){
-  // nested: header row has po_code(col0) + create_date(col3); line row has code(col1),qty(col3),cost(col4)
-  let curDate=null,count=0;
+/* PO: โครงสร้างซ้อน (แถวหัวใบ = po_code+create_date, แถวลูก = รายการสินค้า)
+   เดือนของการนำเข้าอ่านจาก create_date ของใบนั้น ๆ · กันนับซ้ำด้วย po_code */
+function mergePO(rows){
+  let curKey=null, skipDoc=false, added=0, dupDocs=0, newDocs=0;
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; const c0=norm(r[0]), c1=norm(r[1]);
-    if(c1==="product_code") continue;           // secondary header
-    if(c0){ curDate=norm(r[3]); continue; }      // PO header row -> capture create_date
-    if(c1){                                       // line item
+    if(c1==="product_code") continue;                 // secondary header
+    if(c0){                                            // ---- PO header row ----
+      curKey=monthKeyFromDate(r[3]);
+      if(DB.poDocs[c0]!==undefined){ skipDoc=true; dupDocs++; }
+      else { skipDoc=false; newDocs++; DB.poDocs[c0]=curKey||"unknown"; }
+      continue;
+    }
+    if(c1 && !skipDoc){                                // ---- line item ----
       const code=c1, qty=toNum(r[3]), cost=toNum(r[4]);
-      if(!store.po[code]) store.po[code]={imported:0,cost:0,dates:[]};
-      store.po[code].imported+=qty;
-      if(cost) store.po[code].cost=cost;
-      if(curDate) store.po[code].dates.push(curDate);
-      count++;
+      if(!DB.po[code]) DB.po[code]={n:norm(r[2]),co:0,m:{}};
+      const p=DB.po[code];
+      if(cost) p.co=cost;
+      const k=curKey||"unknown";
+      p.m[k]=(p.m[k]||0)+qty;
+      added++;
     }
   }
-  return {ok:true,rows:count};
+  return {ok:true,rows:added,newDocs,dupDocs};
 }
 function ingestFestival(rows){
   const out=[];
@@ -335,7 +395,7 @@ function compute(targetM,growthPct){
   // union of product codes across sales/stock/po
   const codes=new Set([...Object.keys(store.sales),...Object.keys(store.stock||{}),...Object.keys(store.po)]);
 
-  const res={reorder:[],dead:[],stuck:[],review:[],anomaly:[],stuckValue:0};
+  const res={reorder:[],dead:[],stuck:[],review:[],anomaly:[],sellthru:[],stuckValue:0};
 
   codes.forEach(code=>{
     const sa=store.sales[code], st=store.stock?store.stock[code]:null, po=store.po[code];
@@ -379,6 +439,17 @@ function compute(targetM,growthPct){
     const base={code,name,category,qty:stockKnown?qty:null,rawQty,cost,soldTotal,avgMonthly,imported,
                 avgTarget,mos,monthsSince,lastSale:lastSaleKey||"-"};
 
+    // ---- นำเข้า vs ขายออก (sell-through) จากประวัติ PO ที่จำไว้ ----
+    if(imported>0){
+      const poMonths=po&&po.byMonth?Object.keys(po.byMonth).filter(k=>k!=="unknown").sort():[];
+      res.sellthru.push({...base,
+        pctSold:soldTotal/imported,
+        poMonths,
+        byMonthPO:(po&&po.byMonth)||{},
+        lastImport:poMonths.length?poMonths[poMonths.length-1]:null,
+        timesImported:poMonths.length});
+    }
+
     // ---- anomaly bucket (negative stock) -> แยกไว้ตรวจ ไม่นำไปคำนวณต่อ (13.1 ค) ----
     if(anomaly){ res.anomaly.push({...base,reason:"สต็อกติดลบ ("+rawQty+")"}); return; }
 
@@ -415,6 +486,7 @@ function compute(targetM,growthPct){
   res.reorder.sort((a,b)=>b.recommend-a.recommend);
   res.dead.sort((a,b)=>b.qty*b.cost-a.qty*a.cost);
   res.stuck.sort((a,b)=>b.value-a.value);
+  res.sellthru.sort((a,b)=>a.pctSold-b.pctSold);   // แย่สุด (ขายไม่ออก) ขึ้นก่อน
   return res;
 }
 
@@ -448,11 +520,13 @@ function render(res,best){
     <div class="kpi amber"><div class="l">⚠️ Dead Stock</div><div class="n">${fmt(res.dead.length)}</div></div>
     <div class="kpi purple"><div class="l">🕓 ของค้าง (MoS>6)</div><div class="n">${fmt(res.stuck.length)}</div></div>
     <div class="kpi blue"><div class="l">📋 รอพิจารณา / ข้อมูลไม่ครบ</div><div class="n">${fmt(res.review.length)}</div></div>
+    <div class="kpi red"><div class="l">📦 นำเข้าแล้วขายไม่ออก (&lt;30%)</div><div class="n">${fmt(res.sellthru.filter(x=>x.pctSold<0.3).length)}</div></div>
     <div class="kpi"><div class="l">🔴 ข้อมูลผิดปกติ</div><div class="n">${fmt(res.anomaly.length)}</div></div>`;
   // tabs
   const tabDefs=[
     ["reorder","🛒 ควรสั่งซื้อ",res.reorder.length],
     ["best","🏆 ขายดี",best.length],
+    ["sellthru","📦 นำเข้า vs ขายออก",res.sellthru.length],
     ["dead","⚠️ Dead Stock",res.dead.length],
     ["stuck","🕓 เงินจม",res.stuck.length],
     ["review","📋 รอพิจารณา",res.review.length],
@@ -484,6 +558,21 @@ function renderTable(res,best){
     html=tableHTML(["อันดับ","รหัส","ชื่อสินค้า","หมวด","ขายได้(ชิ้น)"],flt(best).slice(0,500),(r,i)=>
       `<tr><td class="num">${i+1}</td><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.category}</td>
        <td class="num" style="font-weight:700">${fmt(r.sold)}</td></tr>`);
+  } else if(currentTab==="sellthru"){
+    html=`<div class="note" style="margin-bottom:8px">เรียงจาก <b>ขายไม่ออกที่สุด → ขายดีที่สุด</b> · คำนวณจากประวัติการนำเข้า (PO) ที่จำไว้ในคลัง · เอาเมาส์ชี้ที่ "นำเข้าล่าสุด" เพื่อดูประวัติทุกเดือน</div>`+
+    tableHTML(["รหัส","ชื่อสินค้า","นำเข้ารวม","ขายได้รวม","%ขายออก","คงเหลือ","นำเข้าล่าสุด","ครั้ง","สถานะ"],flt(res.sellthru),r=>{
+      const p=r.pctSold;
+      const cls=p>=0.8?"good":(p>=0.3?"mid":"bad2");
+      const lbl=p>=0.8?"ขายดี":(p>=0.3?"ปานกลาง":"ขายไม่ออก");
+      const hist=r.poMonths.map(k=>monthLabel(k)+" ("+fmt(r.byMonthPO?r.byMonthPO[k]:0)+")").join(" · ");
+      return `<tr><td>${r.code}</td><td>${r.name}</td>
+        <td class="num">${fmt(r.imported)}</td><td class="num">${fmt(r.soldTotal)}</td>
+        <td class="num" style="font-weight:700">${(p*100).toFixed(0)}%</td>
+        <td class="num">${r.qty==null?'-':fmt(r.qty)}</td>
+        <td title="${hist||'ไม่ทราบเดือน'}">${r.lastImport?monthLabel(r.lastImport):'-'}</td>
+        <td class="num">${r.timesImported}</td>
+        <td><span class="pill ${cls}">${lbl}</span></td></tr>`;
+    });
   } else if(currentTab==="dead"){
     html=tableHTML(["รหัส","ชื่อสินค้า","คงเหลือ","นำเข้า","%ขาย","ไม่ขาย(เดือน)","มูลค่าจม","เหตุผล"],flt(res.dead),r=>
       `<tr><td>${r.code}</td><td>${r.name}</td><td class="num">${fmt(r.qty)}</td><td class="num">${fmt(r.imported)}</td>
@@ -556,8 +645,14 @@ function exportExcel(res,best){
   const s4=res.stuck.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,คงเหลือ:r.qty,ขายเฉลี่ยต่อเดือน:+r.avgMonthly.toFixed(1),อยู่ได้กี่เดือน:r.mos===Infinity?"∞":+r.mos.toFixed(1),มูลค่าจม:+r.value.toFixed(0)}));
   const s5=res.review.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,คงเหลือ:r.qty,เหตุผล:r.reason}));
   const s6=res.anomaly.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,หมวด:r.category,เหตุผล:r.reason}));
+  const s7=res.sellthru.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,นำเข้ารวม:r.imported,ขายได้รวม:r.soldTotal,
+    "%ขายออก":+(r.pctSold*100).toFixed(0),คงเหลือ:r.qty==null?"":r.qty,
+    นำเข้าล่าสุด:r.lastImport?monthLabel(r.lastImport):"",จำนวนครั้งที่นำเข้า:r.timesImported,
+    ประวัตินำเข้า:r.poMonths.map(k=>monthLabel(k)+"("+(r.byMonthPO[k]||0)+")").join(" · "),
+    สถานะ:r.pctSold>=0.8?"ขายดี":(r.pctSold>=0.3?"ปานกลาง":"ขายไม่ออก")}));
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s1),"ควรสั่งซื้อ");
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s2),"ขายดี");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s7),"นำเข้า vs ขายออก");
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s3),"DeadStock");
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s4),"เงินจม");
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s5),"รอพิจารณา");
@@ -591,30 +686,103 @@ async function handleFiles(fileList){
 
 /* re-aggregate everything from the stored raw rows (called on upload & whenever a file's month changes) */
 function rebuildAll(){
-  store.sales={}; store.stock=null; store.po={};
+  store.stock=null;
   FESTIVALS=DEFAULT_FESTIVALS.slice();
-  const seenSales={};
   store.files.forEach(info=>{
     if(!info.rows){ if(info.status==="กำลังอ่าน...") info.status="✗ อ่านไฟล์ไม่ได้"; return; }
     const t=info.type;
     if(t==="stock"){
-      const r=ingestStock(info.rows); info.ok=true; info.status="✓ สต็อก "+r.rows+" รายการ";
+      const r=ingestStock(info.rows); info.ok=true; info.status="✓ สต็อก "+r.rows+" รายการ (ไม่ถูกจำ ต้องอัปทุกครั้ง)";
     } else if(t==="festival"){
       const r=ingestFestival(info.rows); info.ok=r.ok; info.status=r.ok?("✓ ปฏิทิน "+r.rows+" เทศกาล"):("✗ "+r.msg);
     } else if(t==="sales"){
       if(!validPeriod(info.period)){ info.ok=false; info.status="⚠️ โปรดเลือกเดือน/ปีของข้อมูล"; return; }
       const key=info.period.y+"-"+String(info.period.m).padStart(2,"0");
-      const dup=seenSales[key]; seenSales[key]=true;
-      const r=ingestSales(info.rows,{key,m:info.period.m,y:info.period.y}); info.ok=true;
-      info.status="✓ ยอดขาย "+r.rows+" รายการ · "+THMONTHS[info.period.m]+" "+info.period.y+(dup?" · ⚠️ เดือนซ้ำ (ยอดถูกบวกรวม)":"");
+      const r=mergeSales(info.rows,key); info.ok=true;
+      info.status="✓ ยอดขาย "+r.rows+" รายการ · "+monthLabel(key)+" · 💾 จำไว้แล้ว";
     } else if(t==="po"){
-      const r=ingestPO(info.rows); info.ok=true;
-      info.status="✓ PO "+r.rows+" รายการ"+(validPeriod(info.period)?(" · "+THMONTHS[info.period.m]+" "+info.period.y):"");
+      const r=mergePO(info.rows); info.ok=true;
+      info.status="✓ PO ใหม่ "+r.newDocs+" ใบ ("+r.rows+" รายการ)"+(r.dupDocs?" · ข้ามใบซ้ำ "+r.dupDocs+" ใบ":"")+" · 💾 จำไว้แล้ว";
     } else {
       info.ok=false; info.status="✗ ไม่รู้จักประเภทไฟล์ (ดูจากชื่อไฟล์)";
     }
   });
-  renderFileList(); refreshMonthPickers(); updateSummary();
+  saveDB();
+  deriveFromDB();
+  renderFileList(); renderVault(); refreshMonthPickers(); updateSummary();
+}
+
+/* แปลงคลังข้อมูลถาวร -> โครงสร้างที่ compute() ใช้ */
+function deriveFromDB(){
+  store.sales={};
+  Object.keys(DB.sales).forEach(code=>{
+    const s=DB.sales[code];
+    store.sales[code]={name:s.n||"",category:s.c||"",byMonth:s.m||{},cost:s.co||0,sell:0};
+  });
+  store.po={};
+  Object.keys(DB.po).forEach(code=>{
+    const p=DB.po[code]; let tot=0;
+    Object.values(p.m).forEach(v=>tot+=v);
+    store.po[code]={imported:tot,cost:p.co||0,byMonth:p.m||{},name:p.n||""};
+  });
+}
+
+/* ---------- คลังข้อมูล: แสดง / ลบ / สำรอง / กู้คืน ---------- */
+function renderVault(){
+  const el=document.getElementById("vault"); if(!el) return;
+  const sm=dbSalesMonths(), pm=dbPoMonths();
+  const nProd=Object.keys(DB.sales).length, nPoProd=Object.keys(DB.po).length, nDocs=Object.keys(DB.poDocs).length;
+  if(!sm.length && !pm.length){
+    el.innerHTML=`<div class="empty">ยังไม่มีข้อมูลในคลัง — อัปโหลดไฟล์ยอดขาย/PO แล้วระบบจะจำให้อัตโนมัติ</div>`;
+    return;
+  }
+  el.innerHTML=`
+    <div class="vrow">
+      <div class="lbl">📊 ยอดขายที่จำไว้ — <b>${sm.length}</b> เดือน · <b>${fmt(nProd)}</b> สินค้า</div>
+      <div class="chips">${sm.length?sm.map(k=>`<span class="chip"><b>${monthLabel(k)}</b><span class="x" onclick="delSalesMonth('${k}')" title="ลบเดือนนี้ออกจากคลัง">✕</span></span>`).join(""):'<span class="muted">—</span>'}</div>
+    </div>
+    <div class="vrow">
+      <div class="lbl">📦 การนำเข้า (PO) ที่จำไว้ — <b>${pm.length}</b> เดือน · <b>${fmt(nDocs)}</b> ใบ · <b>${fmt(nPoProd)}</b> สินค้า</div>
+      <div class="chips">${pm.length?pm.map(k=>`<span class="chip"><b>${k==="unknown"?"ไม่ทราบเดือน":monthLabel(k)}</b><span class="x" onclick="delPoMonth('${k}')" title="ลบเดือนนี้ออกจากคลัง">✕</span></span>`).join(""):'<span class="muted">—</span>'}</div>
+    </div>`;
+}
+function afterVaultChange(){ saveDB(); deriveFromDB(); renderVault(); refreshMonthPickers(); updateSummary(); }
+function delSalesMonth(k){
+  if(!confirm("ลบยอดขายเดือน "+monthLabel(k)+" ออกจากคลังข้อมูล?")) return;
+  Object.keys(DB.sales).forEach(c=>{ delete DB.sales[c].m[k]; if(!Object.keys(DB.sales[c].m).length) delete DB.sales[c]; });
+  afterVaultChange();
+}
+function delPoMonth(k){
+  const lbl=k==="unknown"?"ไม่ทราบเดือน":monthLabel(k);
+  if(!confirm("ลบข้อมูลนำเข้า (PO) เดือน "+lbl+" ออกจากคลังข้อมูล?")) return;
+  Object.keys(DB.po).forEach(c=>{ delete DB.po[c].m[k]; if(!Object.keys(DB.po[c].m).length) delete DB.po[c]; });
+  Object.keys(DB.poDocs).forEach(d=>{ if(DB.poDocs[d]===k) delete DB.poDocs[d]; });
+  afterVaultChange();
+}
+function clearDB(){
+  if(!confirm("ล้างคลังข้อมูลทั้งหมด (ยอดขายและ PO ที่จำไว้)?\nการกระทำนี้ย้อนกลับไม่ได้ — แนะนำให้กด 'สำรองเป็นไฟล์' ก่อน")) return;
+  DB={sales:{},po:{},poDocs:{}};
+  afterVaultChange();
+}
+function backupDB(){
+  const blob=new Blob([JSON.stringify(DB)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  const d=new Date();
+  a.download=`คลังข้อมูลจัดซื้อ_${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+}
+function restoreDB(file){
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const d=JSON.parse(e.target.result);
+      if(!d || (!d.sales && !d.po)){ alert("ไฟล์สำรองไม่ถูกต้อง"); return; }
+      DB={sales:d.sales||{},po:d.po||{},poDocs:d.poDocs||{}};
+      afterVaultChange();
+      alert("กู้คืนคลังข้อมูลเรียบร้อย\nยอดขาย "+dbSalesMonths().length+" เดือน · PO "+dbPoMonths().length+" เดือน");
+    }catch(err){ alert("อ่านไฟล์สำรองไม่ได้: "+err.message); }
+  };
+  r.readAsText(file);
 }
 
 function monthOptions(sel){
@@ -655,8 +823,9 @@ function refreshMonthPickers(){
 function updateSummary(){
   const nS=Object.keys(store.sales).length, nMonths=allSalesMonths().length;
   const nStock=store.stock?Object.keys(store.stock).length:0, nPO=Object.keys(store.po).length;
+  const warn=nStock?"":' · <span style="color:var(--amber)">⚠️ ยังไม่ได้อัปไฟล์สต็อก (ต้องอัปทุกครั้ง)</span>';
   document.getElementById("dataSummary").innerHTML=
-    `ยอดขาย: <b>${nS}</b> สินค้า / <b>${nMonths}</b> เดือน · สต็อก: <b>${nStock}</b> สินค้า · PO: <b>${nPO}</b> สินค้า · เทศกาล: <b>${FESTIVALS.length}</b> รายการ`;
+    `ยอดขาย: <b>${fmt(nS)}</b> สินค้า / <b>${nMonths}</b> เดือน · PO: <b>${fmt(nPO)}</b> สินค้า / <b>${dbPoMonths().length}</b> เดือน · สต็อก: <b>${fmt(nStock)}</b> สินค้า · เทศกาล: <b>${FESTIVALS.length}</b> รายการ`+warn;
 }
 
 /* month select (target) */
@@ -683,7 +852,14 @@ document.getElementById("search").addEventListener("input",()=>{if(lastResult)re
 document.getElementById("exportBtn").onclick=()=>{if(lastResult)exportExcel(lastResult.res,lastResult.best);};
 document.getElementById("closeModal").onclick=()=>showModal(null);
 document.getElementById("overlay").addEventListener("click",e=>{if(e.target.id==="overlay")showModal(null);});
-updateSummary();
+/* vault buttons */
+document.getElementById("backupBtn").onclick=backupDB;
+document.getElementById("clearBtn").onclick=clearDB;
+document.getElementById("restoreBtn").onclick=()=>document.getElementById("restoreInput").click();
+document.getElementById("restoreInput").addEventListener("change",e=>{ if(e.target.files[0]) restoreDB(e.target.files[0]); e.target.value=""; });
+
+/* ---- startup: โหลดคลังข้อมูลที่จำไว้ ---- */
+loadDB(); deriveFromDB(); renderVault(); refreshMonthPickers(); updateSummary();
 </script>
 </body>
 </html>
