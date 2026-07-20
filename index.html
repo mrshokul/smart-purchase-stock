@@ -29,7 +29,6 @@
   .b-sales{background:#0e7490;color:#cffafe}
   .b-stock{background:#4d7c0f;color:#ecfccb}
   .b-po{background:#6d28d9;color:#ede9fe}
-  .b-fest{background:#a16207;color:#fef9c3}
   .b-unk{background:#7f1d1d;color:#fecaca}
   /* settings */
   .settings{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end}
@@ -143,7 +142,6 @@
             <tr><td>ยอดขายรายเดือน</td><td><code>report_by_product</code></td><td>✅ ต้องมี</td><td><code>report_by_product_2025_07</code></td></tr>
             <tr><td>สต็อกคงเหลือ</td><td><code>export_product_all</code></td><td>❌ ไม่ต้อง (ไฟล์เดียว)</td><td><code>export_product_all_2026_07</code></td></tr>
             <tr><td>ใบนำเข้า (PO)</td><td><code>export_purchase</code></td><td>ควรมี</td><td><code>export_purchase_2025_07</code></td></tr>
-            <tr><td>ปฏิทินเทศกาล</td><td>มีคำว่า <code>festival</code>/<code>ปฏิทิน</code></td><td>❌ ไม่ต้อง</td><td><code>festival_calendar</code></td></tr>
           </tbody>
         </table>
         <b>รูปแบบปี-เดือน:</b> <code>ปปปป_ดด</code> = ปี ค.ศ. 4 หลัก _ เดือน 2 หลัก เช่น <code>2025_07</code> = กรกฎาคม 2025 ·
@@ -152,11 +150,10 @@
 report_by_product_2024_07.xlsx   ← ยอดขาย ก.ค. 2024
 report_by_product_2025_07.xlsx   ← ยอดขาย ก.ค. 2025
 export_product_all_2026_07.xlsx  ← สต็อกปัจจุบัน (ไฟล์เดียว)
-export_purchase_2025_07.xlsx     ← PO
-festival_calendar.xlsx           ← ปฏิทินเทศกาล</div>
+export_purchase_2025_07.xlsx     ← PO</div>
         <div class="gwarn">⚠️ <b>ไม่อยากเปลี่ยนชื่อไฟล์?</b> ลากไฟล์ดิบเข้ามาได้เลย แล้ว <b>เลือกเดือน/ปีจากช่องข้างไฟล์</b> ด้านบนแทน — ได้ผลเหมือนกัน<br>
         ⚠️ วันที่ในชื่อไฟล์ POSPOS คือ "วันกด export" ไม่ใช่เดือนของข้อมูล — ต้องเลือก/ตั้งเดือนให้ตรงกับข้อมูลจริงเสมอ<br>
-        ⚠️ สต็อกใช้ไฟล์เดียว · อย่าอัปยอดขายเดือนเดียวกันซ้ำ (ยอดจะถูกบวกซ้ำ)</div>
+        🛡️ <b>ระบบกันไฟล์ทับกันให้แล้ว:</b> อัปไฟล์เดิมซ้ำจะถูกข้าม · ยอดขายเดือนเดียวกัน 2 ไฟล์จะขึ้นเตือนให้เอาออก · ไฟล์สต็อกใหม่แทนที่ของเดิม · ใบ PO ที่เคยนับแล้วจะไม่นับซ้ำ</div>
       </div>
     </details>
   </div>
@@ -179,7 +176,7 @@ festival_calendar.xlsx           ← ปฏิทินเทศกาล</div>
     <h2>2) ตั้งค่าการคำนวณ</h2>
     <div class="settings">
       <div class="fld">
-        <label>เดือนเป้าหมาย (วางแผนสั่งของเดือนไหน)</label>
+        <label>เดือนเป้าหมาย (ค่าเริ่มต้น = เดือนถัดไป เพื่อเตรียมของล่วงหน้า)</label>
         <select id="targetMonth"></select>
       </div>
       <div class="fld">
@@ -224,19 +221,6 @@ festival_calendar.xlsx           ← ปฏิทินเทศกาล</div>
 </div>
 
 <script>
-/* ================= ปฏิทินเทศกาลเริ่มต้น (แก้ได้โดยอัปไฟล์ทับ) =================
-   month = เดือนที่เกิดเทศกาล, ระบบเตือนล่วงหน้า 1 เดือน */
-const DEFAULT_FESTIVALS = [
-  {name:"เปิดเทอม เทอม 1", month:5,  keywords:["ปากกา","ดินสอ","สมุด","ไม้บรรทัด","ยางลบ","กระเป๋า","ดินน้ำมัน","สีไม้","กบเหลา"]},
-  {name:"เปิดเทอม เทอม 2", month:11, keywords:["ปากกา","ดินสอ","สมุด","ไม้บรรทัด","ยางลบ","สีไม้","แฟ้ม"]},
-  {name:"เข้าพรรษา",       month:7,  keywords:["เทียน","สังฆทาน","จีวร","ธูป"]},
-  {name:"ปีใหม่",          month:1,  keywords:["ปฏิทิน","ไดอารี่","การ์ด","สมุดโน้ต","ของขวัญ"]},
-  {name:"ตรุษจีน",         month:2,  keywords:["ธูป","เทียน","ซองแดง","อั่งเปา"]},
-  {name:"สงกรานต์",        month:4,  keywords:["ปืนฉีดน้ำ","แป้ง"]},
-  {name:"ลอยกระทง",        month:11, keywords:["กระทง","ธูป","เทียน"]},
-];
-let FESTIVALS = DEFAULT_FESTIVALS.slice();
-
 const THMONTHS=["","มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
 const PO_EXCLUDE="พีโอ";
 const store={sales:{}, stock:null, po:{}, files:[]};   // derived per-session view used by compute()
@@ -277,7 +261,6 @@ function detectType(fn){
   if(n.startsWith("report_by_product")) return "sales";
   if(n.startsWith("export_product_all")) return "stock";
   if(n.startsWith("export_purchase"))   return "po";
-  if(n.includes("festival")||n.includes("ปฏิทิน")||n.includes("เทศกาล")||n.includes("calendar")) return "festival";
   return "unknown";
 }
 /* parse YYYY_MM (year-first) else DD_MM_YYYY -> {y,m,key} */
@@ -366,17 +349,6 @@ function mergePO(rows){
   }
   return {ok:true,rows:added,newDocs,dupDocs};
 }
-function ingestFestival(rows){
-  const out=[];
-  for(let i=1;i<rows.length;i++){
-    const r=rows[i]; const name=norm(r[0]); const month=parseInt(norm(r[1]),10);
-    const kw=norm(r[2]).split(/[,،]/).map(s=>s.trim()).filter(Boolean);
-    if(name&&month>=1&&month<=12) out.push({name,month,keywords:kw});
-  }
-  if(out.length){FESTIVALS=out; return {ok:true,rows:out.length};}
-  return {ok:false,msg:"อ่านปฏิทินไม่ได้ (ต้องมีคอลัมน์ ชื่อเทศกาล/เดือน/คำค้น)"};
-}
-
 /* ---------- month picklists ---------- */
 function allSalesMonths(){
   const set=new Set();
@@ -614,20 +586,6 @@ function buildAlerts(res,best){
       <div class="note">อยู่ใน Top 20% ขายดี และของเหลือขายได้ไม่ถึง 1 เดือน — ควรรีบสั่ง</div>
       <ul>${lowStock.slice(0,25).map(x=>`<li>${x.name} <span class="muted">(คงเหลือ ${fmt(x.qty)}, ขายได้อีก ${x.mos===Infinity?'∞':fmtM(x.mos)} เดือน)</span></li>`).join("")}</ul></div>`);
   }
-  // M9: festivals next month
-  const nextMonth=(new Date().getMonth()+2>12)?1:new Date().getMonth()+2;
-  const upFest=FESTIVALS.filter(f=>f.month===nextMonth);
-  upFest.forEach(f=>{
-    const matched=[];
-    Object.keys(store.stock||{}).forEach(code=>{
-      const st=store.stock[code]; if(isPO(st.category))return;
-      if(f.keywords.some(k=>k&&st.name.includes(k))) matched.push(st.name);
-    });
-    parts.push(`<div class="alert-box alert-amber"><b>📅 ใกล้ถึงเทศกาล "${f.name}" (เดือน ${THMONTHS[f.month]})</b>
-      <div class="note">เตือนล่วงหน้า 1 เดือน · คำค้น: ${f.keywords.join(", ")||"-"}</div>
-      ${matched.length?`<div class="note">พบสินค้าที่เกี่ยวข้อง ${matched.length} รายการ เช่น: ${matched.slice(0,12).join(", ")}${matched.length>12?" ...":""}</div>`
-        :`<div class="note">ไม่พบสินค้าที่ตรงคำค้นในสต็อก</div>`}</div>`);
-  });
   return parts.join("");
 }
 function showModal(html){
@@ -672,32 +630,48 @@ fileInput.addEventListener("change",e=>handleFiles(e.target.files));
 function validPeriod(p){return p&&p.m>=1&&p.m<=12&&p.y>=2000&&p.y<=2100;}
 
 async function handleFiles(fileList){
+  const dupNames=[], replacedStock=[];
   for(const f of fileList){
+    // กันอัปไฟล์เดิมซ้ำ (ชื่อ + ขนาดตรงกัน)
+    if(store.files.some(x=>x.file===f.name && x.size===f.size)){ dupNames.push(f.name); continue; }
     const type=detectType(f.name);
+    // ไฟล์สต็อกใช้ได้ครั้งละ 1 ไฟล์ -> ไฟล์ใหม่แทนที่ไฟล์เดิม
+    if(type==="stock"){
+      const old=store.files.findIndex(x=>x.type==="stock");
+      if(old>=0){ replacedStock.push(store.files[old].file); store.files.splice(old,1); }
+    }
     const p=parsePeriod(f.name);
-    const info={file:f.name,type,period:p?{y:p.y,m:p.m}:null,rows:null,status:"กำลังอ่าน...",ok:false};
+    const info={file:f.name,size:f.size,type,period:p?{y:p.y,m:p.m}:null,rows:null,status:"กำลังอ่าน...",ok:false};
     store.files.push(info);
     renderFileList();
     try{ info.rows=await readFile(f); }
     catch(err){ info.status="✗ อ่านไฟล์ไม่ได้: "+err.message; info.ok=false; }
   }
   rebuildAll();
+  const msg=[];
+  if(dupNames.length) msg.push("⛔ ข้ามไฟล์ที่อัปโหลดไปแล้ว:\n• "+dupNames.join("\n• "));
+  if(replacedStock.length) msg.push("ℹ️ ไฟล์สต็อกใหม่แทนที่ไฟล์เดิม:\n• "+replacedStock.join("\n• "));
+  if(msg.length) alert(msg.join("\n\n"));
 }
 
 /* re-aggregate everything from the stored raw rows (called on upload & whenever a file's month changes) */
 function rebuildAll(){
   store.stock=null;
-  FESTIVALS=DEFAULT_FESTIVALS.slice();
+  const seenSalesMonth={};
   store.files.forEach(info=>{
     if(!info.rows){ if(info.status==="กำลังอ่าน...") info.status="✗ อ่านไฟล์ไม่ได้"; return; }
     const t=info.type;
     if(t==="stock"){
       const r=ingestStock(info.rows); info.ok=true; info.status="✓ สต็อก "+r.rows+" รายการ (ไม่ถูกจำ ต้องอัปทุกครั้ง)";
-    } else if(t==="festival"){
-      const r=ingestFestival(info.rows); info.ok=r.ok; info.status=r.ok?("✓ ปฏิทิน "+r.rows+" เทศกาล"):("✗ "+r.msg);
     } else if(t==="sales"){
       if(!validPeriod(info.period)){ info.ok=false; info.status="⚠️ โปรดเลือกเดือน/ปีของข้อมูล"; return; }
       const key=info.period.y+"-"+String(info.period.m).padStart(2,"0");
+      if(seenSalesMonth[key]){   // กันไฟล์ยอดขายทับกัน: 1 เดือน = 1 ไฟล์เท่านั้น
+        info.ok=false;
+        info.status="⛔ ชนกับไฟล์ \""+seenSalesMonth[key]+"\" ที่เป็นเดือน "+monthLabel(key)+" — เอาไฟล์ใดไฟล์หนึ่งออก หรือแก้เดือนให้ต่างกัน";
+        return;
+      }
+      seenSalesMonth[key]=info.file;
       const r=mergeSales(info.rows,key); info.ok=true;
       info.status="✓ ยอดขาย "+r.rows+" รายการ · "+monthLabel(key)+" · 💾 จำไว้แล้ว";
     } else if(t==="po"){
@@ -795,7 +769,7 @@ function setFileYear(i,v){ const f=store.files[i]; f.period=f.period||{y:0,m:0};
 function removeFile(i){ store.files.splice(i,1); rebuildAll(); }
 
 function renderFileList(){
-  const badge={sales:["b-sales","ยอดขาย"],stock:["b-stock","สต็อก"],po:["b-po","PO"],festival:["b-fest","เทศกาล"],unknown:["b-unk","ไม่รู้จัก"]};
+  const badge={sales:["b-sales","ยอดขาย"],stock:["b-stock","สต็อก"],po:["b-po","PO"],unknown:["b-unk","ไม่รู้จัก"]};
   document.getElementById("fileList").innerHTML=store.files.map((f,i)=>{
     const b=badge[f.type]||badge.unknown;
     let pctl="";
@@ -825,14 +799,15 @@ function updateSummary(){
   const nStock=store.stock?Object.keys(store.stock).length:0, nPO=Object.keys(store.po).length;
   const warn=nStock?"":' · <span style="color:var(--amber)">⚠️ ยังไม่ได้อัปไฟล์สต็อก (ต้องอัปทุกครั้ง)</span>';
   document.getElementById("dataSummary").innerHTML=
-    `ยอดขาย: <b>${fmt(nS)}</b> สินค้า / <b>${nMonths}</b> เดือน · PO: <b>${fmt(nPO)}</b> สินค้า / <b>${dbPoMonths().length}</b> เดือน · สต็อก: <b>${fmt(nStock)}</b> สินค้า · เทศกาล: <b>${FESTIVALS.length}</b> รายการ`+warn;
+    `ยอดขาย: <b>${fmt(nS)}</b> สินค้า / <b>${nMonths}</b> เดือน · PO: <b>${fmt(nPO)}</b> สินค้า / <b>${dbPoMonths().length}</b> เดือน · สต็อก: <b>${fmt(nStock)}</b> สินค้า`+warn;
 }
 
 /* month select (target) */
 (function initTarget(){
   const sel=document.getElementById("targetMonth");
   sel.innerHTML=THMONTHS.slice(1).map((m,i)=>`<option value="${i+1}">${m}</option>`).join("");
-  sel.value=new Date().getMonth()+1;
+  const nm=new Date().getMonth()+2;            // ค่าเริ่มต้น = เดือนถัดไป (เตรียมของล่วงหน้า)
+  sel.value=nm>12?1:nm;
 })();
 
 document.getElementById("runBtn").onclick=()=>{
