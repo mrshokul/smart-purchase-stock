@@ -109,6 +109,16 @@
   .chip .x:hover{color:var(--red)}
   .vrow{margin-bottom:12px}
   .vrow .lbl{font-size:13px;color:var(--muted)}
+  /* ใบสั่งซื้อแยกตามผู้ขาย */
+  details.vgroup{background:var(--panel2);border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
+  details.vgroup summary{cursor:pointer;padding:11px 14px;font-size:14px;list-style:none;user-select:none;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+  details.vgroup summary::-webkit-details-marker{display:none}
+  details.vgroup summary:before{content:"▸ ";color:var(--accent)}
+  details.vgroup[open] summary:before{content:"▾ "}
+  details.vgroup summary b{color:var(--accent2)}
+  details.vgroup .vbody{padding:0 12px 12px}
+  .vtotal{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px}
+  .vtotal b{color:var(--green);font-size:15px}
   .pill.good{background:#14532d;color:#bbf7d0}
   .pill.mid{background:#78350f;color:#fed7aa}
   .pill.bad2{background:#7f1d1d;color:#fecaca}
@@ -327,27 +337,48 @@ function ingestStock(rows){
 /* PO: โครงสร้างซ้อน (แถวหัวใบ = po_code+create_date, แถวลูก = รายการสินค้า)
    เดือนของการนำเข้าอ่านจาก create_date ของใบนั้น ๆ · กันนับซ้ำด้วย po_code */
 function mergePO(rows){
-  let curKey=null, skipDoc=false, added=0, dupDocs=0, newDocs=0;
+  let curKey=null, curVendor="", skipDoc=false, added=0, dupDocs=0, newDocs=0;
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; const c0=norm(r[0]), c1=norm(r[1]);
     if(c1==="product_code") continue;                 // secondary header
     if(c0){                                            // ---- PO header row ----
       curKey=monthKeyFromDate(r[3]);
+      curVendor=norm(r[4]);                            // vendor_detail = ชื่อผู้ขาย
       if(DB.poDocs[c0]!==undefined){ skipDoc=true; dupDocs++; }
       else { skipDoc=false; newDocs++; DB.poDocs[c0]=curKey||"unknown"; }
       continue;
     }
     if(c1 && !skipDoc){                                // ---- line item ----
       const code=c1, qty=toNum(r[3]), cost=toNum(r[4]);
-      if(!DB.po[code]) DB.po[code]={n:norm(r[2]),co:0,m:{}};
+      if(!DB.po[code]) DB.po[code]={n:norm(r[2]),co:0,m:{},vs:{}};
       const p=DB.po[code];
+      if(!p.vs) p.vs={};                               // รองรับข้อมูลเก่าที่ยังไม่มีผู้ขาย
       if(cost) p.co=cost;
       const k=curKey||"unknown";
       p.m[k]=(p.m[k]||0)+qty;
+      if(curVendor){                                   // สะสมผู้ขาย + เดือนที่ซื้อล่าสุด
+        const v=p.vs[curVendor]||(p.vs[curVendor]={q:0,l:null});
+        v.q+=qty;
+        if(curKey && (!v.l || curKey>v.l)) v.l=curKey;
+      }
       added++;
     }
   }
   return {ok:true,rows:added,newDocs,dupDocs};
+}
+
+/* ผู้ขายหลักของสินค้า = เจ้าที่ซื้อล่าสุด (ถ้าเดือนเท่ากันใช้เจ้าที่ซื้อเยอะกว่า) */
+function primaryVendor(code){
+  const p=DB.po[code];
+  if(!p||!p.vs) return "";
+  let best=null;
+  Object.keys(p.vs).forEach(name=>{
+    const cur=p.vs[name];
+    if(!best){ best={name,...cur}; return; }
+    const a=cur.l||"", b=best.l||"";
+    if(a>b || (a===b && cur.q>best.q)) best={name,...cur};
+  });
+  return best?best.name:"";
 }
 /* ---------- month picklists ---------- */
 function allSalesMonths(){
@@ -409,7 +440,8 @@ function compute(targetM,growthPct){
     let mos = avgMonthly>0 ? qty/avgMonthly : (qty>0?Infinity:0);
 
     const base={code,name,category,qty:stockKnown?qty:null,rawQty,cost,soldTotal,avgMonthly,imported,
-                avgTarget,mos,monthsSince,lastSale:lastSaleKey||"-"};
+                avgTarget,mos,monthsSince,lastSale:lastSaleKey||"-",
+                vendor:(po&&po.vendor)||""};
 
     // ---- นำเข้า vs ขายออก (sell-through) จากประวัติ PO ที่จำไว้ ----
     if(imported>0){
@@ -497,6 +529,7 @@ function render(res,best){
   // tabs
   const tabDefs=[
     ["reorder","🛒 ควรสั่งซื้อ",res.reorder.length],
+    ["vendor","🏪 สั่งตามผู้ขาย",new Set(res.reorder.map(r=>r.vendor||"?")).size],
     ["best","🏆 ขายดี",best.length],
     ["sellthru","📦 นำเข้า vs ขายออก",res.sellthru.length],
     ["dead","⚠️ Dead Stock",res.dead.length],
@@ -522,10 +555,36 @@ function renderTable(res,best){
   const area=document.getElementById("tableArea");
   let html="";
   if(currentTab==="reorder"){
-    html=tableHTML(["รหัส","ชื่อสินค้า","หมวด","คงเหลือ","เฉลี่ยเดือนเป้าหมาย(3ปี)","แนะนำให้สั่ง"],flt(res.reorder),r=>
-      `<tr><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.category}</td>
+    html=tableHTML(["รหัส","ชื่อสินค้า","ผู้ขาย","คงเหลือ","เฉลี่ยเดือนเป้าหมาย(3ปี)","แนะนำให้สั่ง"],flt(res.reorder),r=>
+      `<tr><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.vendor||"—"}</td>
        <td class="num">${fmt(r.qty)}</td><td class="num">${fmtM(r.avgTarget)}</td>
        <td class="num" style="color:var(--green);font-weight:700">${fmt(r.recommend)}</td></tr>`);
+  } else if(currentTab==="vendor"){
+    const groups={};
+    flt(res.reorder).forEach(r=>{ const v=r.vendor||"— ไม่ทราบผู้ขาย (ไม่มีประวัติ PO) —"; (groups[v]=groups[v]||[]).push(r); });
+    const sumOf=list=>list.reduce((s,x)=>s+x.recommend*(x.cost||0),0);
+    const keys=Object.keys(groups).sort((a,b)=>sumOf(groups[b])-sumOf(groups[a]));
+    if(!keys.length){ html=`<div class="empty">— ไม่มีรายการ —</div>`; }
+    else{
+      const grand=keys.reduce((s,k)=>s+sumOf(groups[k]),0);
+      const grandQty=keys.reduce((s,k)=>s+groups[k].reduce((a,x)=>a+x.recommend,0),0);
+      html=`<div class="vtotal">รวมทั้งหมด <b>${keys.length}</b> ผู้ขาย · <b>${fmt(res.reorder.length)}</b> รายการ · <b>${fmt(grandQty)}</b> ชิ้น · ประมาณ <b>${money(grand)}</b>
+        <div class="note">เรียงจากผู้ขายที่ต้องสั่งเป็นเงินมากสุด · คลิกชื่อผู้ขายเพื่อย่อ/ขยาย · "ประมาณ" คิดจากราคาทุนล่าสุด</div></div>`+
+      keys.map(v=>{
+        const items=groups[v].slice().sort((a,b)=>b.recommend*(b.cost||0)-a.recommend*(a.cost||0));
+        const qty=items.reduce((s,x)=>s+x.recommend,0);
+        return `<details class="vgroup" open>
+          <summary><b>🏪 ${v}</b><span class="muted">${items.length} รายการ · ${fmt(qty)} ชิ้น · ประมาณ ${money(sumOf(items))}</span></summary>
+          <div class="vbody"><div class="tblwrap" style="max-height:400px">
+            <table><thead><tr><th>รหัส</th><th>ชื่อสินค้า</th><th>คงเหลือ</th><th>แนะนำให้สั่ง</th><th>ทุน/ชิ้น</th><th>รวมเงิน</th></tr></thead>
+            <tbody>${items.map(x=>`<tr><td>${x.code}</td><td>${x.name}</td>
+              <td class="num">${fmt(x.qty)}</td>
+              <td class="num" style="color:var(--green);font-weight:700">${fmt(x.recommend)}</td>
+              <td class="num">${fmtM(x.cost)}</td>
+              <td class="num">${money(x.recommend*(x.cost||0))}</td></tr>`).join("")}</tbody></table>
+          </div></div></details>`;
+      }).join("");
+    }
   } else if(currentTab==="best"){
     html=tableHTML(["อันดับ","รหัส","ชื่อสินค้า","หมวด","ขายได้(ชิ้น)"],flt(best).slice(0,500),(r,i)=>
       `<tr><td class="num">${i+1}</td><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.category}</td>
@@ -597,7 +656,11 @@ function showModal(html){
 /* ---------- Export (M11) ---------- */
 function exportExcel(res,best){
   const wb=XLSX.utils.book_new();
-  const s1=res.reorder.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,หมวด:r.category,คงเหลือ:r.qty,"เฉลี่ยเดือนเป้าหมาย(3ปี)":+r.avgTarget.toFixed(1),แนะนำให้สั่ง:r.recommend}));
+  const s1=res.reorder.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,ผู้ขาย:r.vendor||"",หมวด:r.category,คงเหลือ:r.qty,"เฉลี่ยเดือนเป้าหมาย(3ปี)":+r.avgTarget.toFixed(1),แนะนำให้สั่ง:r.recommend}));
+  const s8=res.reorder.slice()
+    .sort((a,b)=>(a.vendor||"zzz").localeCompare(b.vendor||"zzz")||b.recommend*(b.cost||0)-a.recommend*(a.cost||0))
+    .map(r=>({ผู้ขาย:r.vendor||"— ไม่ทราบผู้ขาย —",รหัส:r.code,ชื่อสินค้า:r.name,คงเหลือ:r.qty,
+      แนะนำให้สั่ง:r.recommend,"ทุนต่อชิ้น":+(r.cost||0).toFixed(2),รวมเงิน:+(r.recommend*(r.cost||0)).toFixed(0)}));
   const s2=best.map((r,i)=>({อันดับ:i+1,รหัส:r.code,ชื่อสินค้า:r.name,หมวด:r.category,ขายได้ชิ้น:r.sold}));
   const s3=res.dead.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,คงเหลือ:r.qty,นำเข้า:r.imported,"%ขาย":+(r.pctSold*100).toFixed(0),ไม่ขายกี่เดือน:r.monthsSince>900?"":r.monthsSince,มูลค่าจม:+(r.qty*r.cost).toFixed(0),เหตุผล:r.reason}));
   const s4=res.stuck.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,คงเหลือ:r.qty,ขายเฉลี่ยต่อเดือน:+r.avgMonthly.toFixed(1),อยู่ได้กี่เดือน:r.mos===Infinity?"∞":+r.mos.toFixed(1),มูลค่าจม:+r.value.toFixed(0)}));
@@ -609,6 +672,7 @@ function exportExcel(res,best){
     ประวัตินำเข้า:r.poMonths.map(k=>monthLabel(k)+"("+(r.byMonthPO[k]||0)+")").join(" · "),
     สถานะ:r.pctSold>=0.8?"ขายดี":(r.pctSold>=0.3?"ปานกลาง":"ขายไม่ออก")}));
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s1),"ควรสั่งซื้อ");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s8),"สั่งตามผู้ขาย");
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s2),"ขายดี");
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s7),"นำเข้า vs ขายออก");
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s3),"DeadStock");
@@ -697,7 +761,8 @@ function deriveFromDB(){
   Object.keys(DB.po).forEach(code=>{
     const p=DB.po[code]; let tot=0;
     Object.values(p.m).forEach(v=>tot+=v);
-    store.po[code]={imported:tot,cost:p.co||0,byMonth:p.m||{},name:p.n||""};
+    store.po[code]={imported:tot,cost:p.co||0,byMonth:p.m||{},name:p.n||"",
+                    vendor:primaryVendor(code),vendors:p.vs||{}};
   });
 }
 
