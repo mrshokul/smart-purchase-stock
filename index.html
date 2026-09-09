@@ -127,6 +127,16 @@
   .dbox .l{font-size:11px;color:var(--muted)} .dbox .v{font-size:17px;font-weight:700;margin-top:3px}
   .dsec{margin-top:16px} .dsec h4{margin:0 0 8px;font-size:14px;color:var(--accent2)}
   .dhint{font-size:12px;color:var(--muted);margin-top:4px}
+  /* ค้นหาสินค้าเจาะจง */
+  .psearch{position:relative;max-width:640px}
+  #prodSearch{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:11px 14px;font-size:15px}
+  #prodSearch:focus{outline:none;border-color:var(--accent)}
+  .presults{position:absolute;left:0;right:0;top:calc(100% + 4px);background:var(--panel);border:1px solid var(--line);border-radius:9px;max-height:340px;overflow:auto;z-index:20;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+  .pres{padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--line);font-size:13px;display:flex;justify-content:space-between;gap:10px}
+  .pres:last-child{border-bottom:none}
+  .pres:hover,.pres.active{background:#0b2536}
+  .pres .pc{color:var(--muted);font-size:12px;white-space:nowrap}
+  .pres .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .pill.good{background:#14532d;color:#bbf7d0}
   .pill.mid{background:#78350f;color:#fed7aa}
   .pill.bad2{background:#7f1d1d;color:#fecaca}
@@ -187,6 +197,16 @@ export_purchase_2025_07.xlsx     ← PO</div>
       <input id="restoreInput" type="file" accept=".json,application/json" class="hidden">
     </div>
     <div class="note">ข้อมูลถูกจำไว้ในเบราว์เซอร์เครื่องนี้เท่านั้น (ไม่ได้ส่งขึ้นเซิร์ฟเวอร์) · ถ้าจะย้ายเครื่องหรือกลัวแคชถูกล้าง ให้กด "สำรองเป็นไฟล์" เก็บไว้</div>
+  </div>
+
+  <!-- ค้นหาสินค้าเจาะจง -->
+  <div class="card">
+    <h2>🔎 ค้นหาสินค้าที่สนใจ (ดูรายละเอียดได้ทันที ไม่ต้องกดประมวลผล)</h2>
+    <div class="psearch">
+      <input id="prodSearch" placeholder="พิมพ์รหัสสินค้า หรือ ชื่อสินค้า เช่น ปากกา, 4746..." autocomplete="off">
+      <div id="prodResults" class="presults hidden"></div>
+    </div>
+    <div class="note" id="prodSearchNote"></div>
   </div>
 
   <!-- STEP 2: SETTINGS -->
@@ -660,6 +680,34 @@ function buildAlerts(res,best){
   }
   return parts.join("");
 }
+/* ---------- ค้นหาสินค้าเจาะจง ---------- */
+function allProducts(){
+  const map={};
+  Object.keys(DB.sales).forEach(c=>{ map[c]=map[c]||{code:c,name:DB.sales[c].n||""}; });
+  Object.keys(DB.po).forEach(c=>{ if(!map[c])map[c]={code:c,name:DB.po[c].n||""}; else if(!map[c].name)map[c].name=DB.po[c].n||""; });
+  if(store.stock) Object.keys(store.stock).forEach(c=>{ if(!map[c])map[c]={code:c,name:store.stock[c].name||""}; else if(!map[c].name)map[c].name=store.stock[c].name||""; });
+  return Object.values(map);
+}
+let psList=[], psActive=-1;
+function runProdSearch(){
+  const q=(document.getElementById("prodSearch").value||"").toLowerCase().trim();
+  const box=document.getElementById("prodResults"), note=document.getElementById("prodSearchNote");
+  const all=allProducts();
+  if(!all.length){ box.classList.add("hidden"); note.textContent="ยังไม่มีข้อมูลสินค้า — อัปโหลดไฟล์ก่อน"; return; }
+  if(!q){ box.classList.add("hidden"); note.textContent="มีสินค้าในระบบ "+fmt(all.length)+" รายการ"; return; }
+  psList=all.filter(p=>(p.code+" "+p.name).toLowerCase().includes(q)).slice(0,40);
+  psActive=-1;
+  if(!psList.length){ box.innerHTML=`<div class="pres"><span class="muted">ไม่พบสินค้าที่ตรงกับ "${q}"</span></div>`; box.classList.remove("hidden"); return; }
+  box.innerHTML=psList.map((p,i)=>`<div class="pres" data-i="${i}"><span class="pn">${p.name||"(ไม่มีชื่อ)"}</span><span class="pc">${p.code}</span></div>`).join("");
+  box.classList.remove("hidden");
+}
+function pickProd(i){
+  const p=psList[i]; if(!p) return;
+  document.getElementById("prodResults").classList.add("hidden");
+  document.getElementById("prodSearch").value="";
+  showProductDetail(p.code);
+}
+
 /* ---------- รายละเอียดสินค้า (คลิกที่แถว) ---------- */
 function showProductDetail(code){
   const sa=store.sales[code], po=store.po[code], st=store.stock?store.stock[code]:null;
@@ -976,6 +1024,21 @@ document.getElementById("search").addEventListener("input",()=>{if(lastResult)re
 document.getElementById("tableArea").addEventListener("click",e=>{
   const tr=e.target.closest("tr[data-code]"); if(tr&&tr.dataset.code) showProductDetail(tr.dataset.code);
 });
+/* product search wiring */
+const ps=document.getElementById("prodSearch"), psBox=document.getElementById("prodResults");
+ps.addEventListener("input",runProdSearch);
+ps.addEventListener("focus",runProdSearch);
+ps.addEventListener("keydown",e=>{
+  if(psBox.classList.contains("hidden")) return;
+  if(e.key==="ArrowDown"){e.preventDefault();psActive=Math.min(psActive+1,psList.length-1);}
+  else if(e.key==="ArrowUp"){e.preventDefault();psActive=Math.max(psActive-1,0);}
+  else if(e.key==="Enter"){e.preventDefault(); if(psActive>=0)pickProd(psActive); else if(psList.length===1)pickProd(0); return;}
+  else if(e.key==="Escape"){psBox.classList.add("hidden");return;}
+  else return;
+  [...psBox.querySelectorAll(".pres")].forEach((el,i)=>{el.classList.toggle("active",i===psActive); if(i===psActive)el.scrollIntoView({block:"nearest"});});
+});
+psBox.addEventListener("click",e=>{ const el=e.target.closest(".pres[data-i]"); if(el) pickProd(+el.dataset.i); });
+document.addEventListener("click",e=>{ if(!e.target.closest(".psearch")) psBox.classList.add("hidden"); });
 document.getElementById("exportBtn").onclick=()=>{if(lastResult)exportExcel(lastResult.res,lastResult.best);};
 document.getElementById("closeModal").onclick=()=>showModal(null);
 document.getElementById("overlay").addEventListener("click",e=>{if(e.target.id==="overlay")showModal(null);});
@@ -986,7 +1049,7 @@ document.getElementById("restoreBtn").onclick=()=>document.getElementById("resto
 document.getElementById("restoreInput").addEventListener("change",e=>{ if(e.target.files[0]) restoreDB(e.target.files[0]); e.target.value=""; });
 
 /* ---- startup: โหลดคลังข้อมูลที่จำไว้ ---- */
-loadDB(); deriveFromDB(); renderVault(); refreshMonthPickers(); updateSummary();
+loadDB(); deriveFromDB(); renderVault(); refreshMonthPickers(); updateSummary(); runProdSearch();
 </script>
 </body>
 </html>
