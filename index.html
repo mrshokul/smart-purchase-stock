@@ -119,6 +119,14 @@
   details.vgroup .vbody{padding:0 12px 12px}
   .vtotal{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px}
   .vtotal b{color:var(--green);font-size:15px}
+  /* คลิกดูรายละเอียดสินค้า */
+  #tableArea tbody tr[data-code]{cursor:pointer}
+  #tableArea tbody tr[data-code]:hover{background:#0b2536}
+  .dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0}
+  .dbox{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 12px}
+  .dbox .l{font-size:11px;color:var(--muted)} .dbox .v{font-size:17px;font-weight:700;margin-top:3px}
+  .dsec{margin-top:16px} .dsec h4{margin:0 0 8px;font-size:14px;color:var(--accent2)}
+  .dhint{font-size:12px;color:var(--muted);margin-top:4px}
   .pill.good{background:#14532d;color:#bbf7d0}
   .pill.mid{background:#78350f;color:#fed7aa}
   .pill.bad2{background:#7f1d1d;color:#fecaca}
@@ -217,6 +225,7 @@ export_purchase_2025_07.xlsx     ← PO</div>
     <div class="card">
       <div class="tabs" id="tabs"></div>
       <input class="search" id="search" placeholder="🔍 ค้นหา รหัส/ชื่อสินค้า...">
+      <div class="note" style="margin-bottom:8px">💡 คลิกที่แถวสินค้าเพื่อดูรายละเอียด (ประวัตินำเข้า วันที่ ราคาทุน ยอดขายรายเดือน)</div>
       <div id="tableArea"></div>
     </div>
   </div>
@@ -225,7 +234,7 @@ export_purchase_2025_07.xlsx     ← PO</div>
 <!-- ALERT MODAL -->
 <div id="overlay" class="overlay hidden">
   <div class="modal">
-    <div class="modal-h"><h3>🔔 แจ้งเตือน</h3><button class="close" id="closeModal">&times;</button></div>
+    <div class="modal-h"><h3 id="modalTitle">🔔 แจ้งเตือน</h3><button class="close" id="closeModal">&times;</button></div>
     <div class="modal-b" id="modalBody"></div>
   </div>
 </div>
@@ -337,25 +346,29 @@ function ingestStock(rows){
 /* PO: โครงสร้างซ้อน (แถวหัวใบ = po_code+create_date, แถวลูก = รายการสินค้า)
    เดือนของการนำเข้าอ่านจาก create_date ของใบนั้น ๆ · กันนับซ้ำด้วย po_code */
 function mergePO(rows){
-  let curKey=null, curVendor="", skipDoc=false, added=0, dupDocs=0, newDocs=0;
+  let curKey=null, curVendor="", curDate="", curDoc="", skipDoc=false, added=0, dupDocs=0, newDocs=0;
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; const c0=norm(r[0]), c1=norm(r[1]);
     if(c1==="product_code") continue;                 // secondary header
     if(c0){                                            // ---- PO header row ----
+      curDate=norm(r[3]);                              // create_date ดิบ เช่น 06/07/2026
       curKey=monthKeyFromDate(r[3]);
       curVendor=norm(r[4]);                            // vendor_detail = ชื่อผู้ขาย
+      curDoc=c0;                                       // po_code
       if(DB.poDocs[c0]!==undefined){ skipDoc=true; dupDocs++; }
       else { skipDoc=false; newDocs++; DB.poDocs[c0]=curKey||"unknown"; }
       continue;
     }
     if(c1 && !skipDoc){                                // ---- line item ----
       const code=c1, qty=toNum(r[3]), cost=toNum(r[4]);
-      if(!DB.po[code]) DB.po[code]={n:norm(r[2]),co:0,m:{},vs:{}};
+      if(!DB.po[code]) DB.po[code]={n:norm(r[2]),co:0,m:{},vs:{},h:[]};
       const p=DB.po[code];
-      if(!p.vs) p.vs={};                               // รองรับข้อมูลเก่าที่ยังไม่มีผู้ขาย
+      if(!p.vs) p.vs={};                               // รองรับข้อมูลเก่า
+      if(!p.h) p.h=[];
       if(cost) p.co=cost;
       const k=curKey||"unknown";
       p.m[k]=(p.m[k]||0)+qty;
+      p.h.push({d:curDate,k,q:qty,c:cost,v:curVendor,po:curDoc});  // ประวัตินำเข้าละเอียดต่อครั้ง
       if(curVendor){                                   // สะสมผู้ขาย + เดือนที่ซื้อล่าสุด
         const v=p.vs[curVendor]||(p.vs[curVendor]={q:0,l:null});
         v.q+=qty;
@@ -556,7 +569,7 @@ function renderTable(res,best){
   let html="";
   if(currentTab==="reorder"){
     html=tableHTML(["รหัส","ชื่อสินค้า","ผู้ขาย","คงเหลือ","เฉลี่ยเดือนเป้าหมาย(3ปี)","แนะนำให้สั่ง"],flt(res.reorder),r=>
-      `<tr><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.vendor||"—"}</td>
+      `<tr data-code="${r.code}"><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.vendor||"—"}</td>
        <td class="num">${fmt(r.qty)}</td><td class="num">${fmtM(r.avgTarget)}</td>
        <td class="num" style="color:var(--green);font-weight:700">${fmt(r.recommend)}</td></tr>`);
   } else if(currentTab==="vendor"){
@@ -577,7 +590,7 @@ function renderTable(res,best){
           <summary><b>🏪 ${v}</b><span class="muted">${items.length} รายการ · ${fmt(qty)} ชิ้น · ประมาณ ${money(sumOf(items))}</span></summary>
           <div class="vbody"><div class="tblwrap" style="max-height:400px">
             <table><thead><tr><th>รหัส</th><th>ชื่อสินค้า</th><th>คงเหลือ</th><th>แนะนำให้สั่ง</th><th>ทุน/ชิ้น</th><th>รวมเงิน</th></tr></thead>
-            <tbody>${items.map(x=>`<tr><td>${x.code}</td><td>${x.name}</td>
+            <tbody>${items.map(x=>`<tr data-code="${x.code}"><td>${x.code}</td><td>${x.name}</td>
               <td class="num">${fmt(x.qty)}</td>
               <td class="num" style="color:var(--green);font-weight:700">${fmt(x.recommend)}</td>
               <td class="num">${fmtM(x.cost)}</td>
@@ -587,7 +600,7 @@ function renderTable(res,best){
     }
   } else if(currentTab==="best"){
     html=tableHTML(["อันดับ","รหัส","ชื่อสินค้า","หมวด","ขายได้(ชิ้น)"],flt(best).slice(0,500),(r,i)=>
-      `<tr><td class="num">${i+1}</td><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.category}</td>
+      `<tr data-code="${r.code}"><td class="num">${i+1}</td><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.category}</td>
        <td class="num" style="font-weight:700">${fmt(r.sold)}</td></tr>`);
   } else if(currentTab==="sellthru"){
     html=`<div class="note" style="margin-bottom:8px">เรียงจาก <b>ขายไม่ออกที่สุด → ขายดีที่สุด</b> · คำนวณจากประวัติการนำเข้า (PO) ที่จำไว้ในคลัง · เอาเมาส์ชี้ที่ "นำเข้าล่าสุด" เพื่อดูประวัติทุกเดือน</div>`+
@@ -596,7 +609,7 @@ function renderTable(res,best){
       const cls=p>=0.8?"good":(p>=0.3?"mid":"bad2");
       const lbl=p>=0.8?"ขายดี":(p>=0.3?"ปานกลาง":"ขายไม่ออก");
       const hist=r.poMonths.map(k=>monthLabel(k)+" ("+fmt(r.byMonthPO?r.byMonthPO[k]:0)+")").join(" · ");
-      return `<tr><td>${r.code}</td><td>${r.name}</td>
+      return `<tr data-code="${r.code}"><td>${r.code}</td><td>${r.name}</td>
         <td class="num">${fmt(r.imported)}</td><td class="num">${fmt(r.soldTotal)}</td>
         <td class="num" style="font-weight:700">${(p*100).toFixed(0)}%</td>
         <td class="num">${r.qty==null?'-':fmt(r.qty)}</td>
@@ -606,20 +619,20 @@ function renderTable(res,best){
     });
   } else if(currentTab==="dead"){
     html=tableHTML(["รหัส","ชื่อสินค้า","คงเหลือ","นำเข้า","%ขาย","ไม่ขาย(เดือน)","มูลค่าจม","เหตุผล"],flt(res.dead),r=>
-      `<tr><td>${r.code}</td><td>${r.name}</td><td class="num">${fmt(r.qty)}</td><td class="num">${fmt(r.imported)}</td>
+      `<tr data-code="${r.code}"><td>${r.code}</td><td>${r.name}</td><td class="num">${fmt(r.qty)}</td><td class="num">${fmt(r.imported)}</td>
        <td class="num">${(r.pctSold*100).toFixed(0)}%</td><td class="num">${r.monthsSince>900?'∞':r.monthsSince}</td>
        <td class="num">${money(r.qty*r.cost)}</td><td><span class="pill dead">${r.reason}</span></td></tr>`);
   } else if(currentTab==="stuck"){
     html=tableHTML(["รหัส","ชื่อสินค้า","คงเหลือ","ขายเฉลี่ย/เดือน","อยู่ได้(เดือน)","มูลค่าจม"],flt(res.stuck),r=>
-      `<tr><td>${r.code}</td><td>${r.name}</td><td class="num">${fmt(r.qty)}</td><td class="num">${fmtM(r.avgMonthly)}</td>
+      `<tr data-code="${r.code}"><td>${r.code}</td><td>${r.name}</td><td class="num">${fmt(r.qty)}</td><td class="num">${fmtM(r.avgMonthly)}</td>
        <td class="num">${r.mos===Infinity?'∞':fmtM(r.mos)}</td><td class="num" style="color:var(--amber)">${money(r.value)}</td></tr>`);
   } else if(currentTab==="review"){
     html=tableHTML(["รหัส","ชื่อสินค้า","คงเหลือ","เหตุผล"],flt(res.review),r=>
-      `<tr><td>${r.code}</td><td>${r.name}</td><td class="num">${r.qty==null?'-':fmt(r.qty)}</td>
+      `<tr data-code="${r.code}"><td>${r.code}</td><td>${r.name}</td><td class="num">${r.qty==null?'-':fmt(r.qty)}</td>
        <td><span class="pill review">${r.reason}</span></td></tr>`);
   } else if(currentTab==="anomaly"){
     html=tableHTML(["รหัส","ชื่อสินค้า","หมวด","เหตุผล"],flt(res.anomaly),r=>
-      `<tr><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.category}</td>
+      `<tr data-code="${r.code}"><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.category}</td>
        <td><span class="pill anom">${r.reason}</span></td></tr>`);
   }
   area.innerHTML=html;
@@ -647,7 +660,73 @@ function buildAlerts(res,best){
   }
   return parts.join("");
 }
-function showModal(html){
+/* ---------- รายละเอียดสินค้า (คลิกที่แถว) ---------- */
+function showProductDetail(code){
+  const sa=store.sales[code], po=store.po[code], st=store.stock?store.stock[code]:null;
+  if(!sa && !po && !st){ return; }
+  const name=(st&&st.name)||(sa&&sa.name)||(po&&po.name)||"";
+  const category=(st&&st.category)||(sa&&sa.category)||"";
+  const cost=(st&&st.cost)||(po&&po.cost)||(sa&&sa.cost)||0;
+
+  // สต็อก
+  let qtyTxt="ไม่มีข้อมูลสต็อก (ต้องอัปไฟล์สต็อก)";
+  if(st){ const q=st.qty<0?st.qty:Math.ceil(st.qty); qtyTxt=fmt(q)+(st.unit?(" "+st.unit):"")+(st.qty<0?' ⚠️ ติดลบ':''); }
+
+  // ยอดขาย
+  const bm=(sa&&sa.byMonth)||{};
+  const nMonths=allSalesMonths().length||1;
+  let soldTotal=0,lastSale=null;
+  Object.keys(bm).forEach(k=>{soldTotal+=bm[k]; if(bm[k]>0&&(!lastSale||k>lastSale))lastSale=k;});
+  const avgMonthly=soldTotal/nMonths;
+
+  // นำเข้า
+  const hist=((po&&po.history)||[]).slice().sort((a,b)=>(b.k||"").localeCompare(a.k||"")||(b.d||"").localeCompare(a.d||""));
+  const imported=po?po.imported:0;
+  const pctSold=imported>0?(soldTotal/imported*100):null;
+  const q=st?(st.qty<0?st.qty:Math.ceil(st.qty)):null;
+  const mos=(q!=null&&avgMonthly>0)?q/avgMonthly:(q>0?Infinity:null);
+
+  const kpi=(l,v)=>`<div class="dbox"><div class="l">${l}</div><div class="v">${v}</div></div>`;
+  let html=`<div class="dhint">รหัส <b>${code}</b>${category?(" · หมวด "+category):""}</div>
+    <div class="dgrid">
+      ${kpi("คงเหลือปัจจุบัน",qtyTxt)}
+      ${kpi("ราคาทุน/ชิ้น",cost?money(cost):"-")}
+      ${kpi("ราคาขาย",st&&st.price?money(st.price):"-")}
+      ${kpi("นำเข้ารวม",fmt(imported)+" ชิ้น")}
+      ${kpi("นำเข้าทั้งหมด",hist.length+" ครั้ง")}
+      ${kpi("ขายได้รวม",fmt(soldTotal)+" ชิ้น")}
+      ${kpi("ขายเฉลี่ย/เดือน",fmtM(avgMonthly))}
+      ${kpi("%ขายออก",pctSold==null?"-":pctSold.toFixed(0)+"%")}
+      ${kpi("ของพอขายอีก",mos==null?"-":(mos===Infinity?"∞":fmtM(mos)+" เดือน"))}
+      ${kpi("ขายล่าสุด",lastSale?monthLabel(lastSale):"ไม่มี")}
+    </div>`;
+
+  // ประวัตินำเข้า
+  html+=`<div class="dsec"><h4>📦 ประวัติการนำเข้า (${hist.length} ครั้ง)</h4>`;
+  if(hist.length){
+    html+=`<div class="tblwrap" style="max-height:280px"><table>
+      <thead><tr><th>วันที่</th><th>จำนวน</th><th>ทุน/ชิ้น</th><th>ผู้ขาย</th><th>เลขที่ PO</th></tr></thead>
+      <tbody>${hist.map(h=>`<tr><td>${h.d||(h.k&&h.k!=="unknown"?monthLabel(h.k):"-")}</td>
+        <td class="num">${fmt(h.q)}</td><td class="num">${h.c?fmtM(h.c):"-"}</td>
+        <td class="muted">${h.v||"-"}</td><td class="muted">${h.po||"-"}</td></tr>`).join("")}</tbody></table></div>`;
+  } else html+=`<div class="dhint">ยังไม่มีประวัติการนำเข้าในคลังข้อมูล (อัปไฟล์ PO เพิ่ม)</div>`;
+  html+=`</div>`;
+
+  // ประวัติยอดขายรายเดือน
+  const sm=Object.keys(bm).sort().reverse();
+  html+=`<div class="dsec"><h4>📊 ยอดขายรายเดือน (${sm.length} เดือน)</h4>`;
+  if(sm.length){
+    html+=`<div class="tblwrap" style="max-height:240px"><table>
+      <thead><tr><th>เดือน</th><th>ขายได้ (ชิ้น)</th></tr></thead>
+      <tbody>${sm.map(k=>`<tr><td>${monthLabel(k)}</td><td class="num">${fmt(bm[k])}</td></tr>`).join("")}</tbody></table></div>`;
+  } else html+=`<div class="dhint">ยังไม่มีข้อมูลยอดขายในคลัง</div>`;
+  html+=`</div>`;
+
+  showModal(html,"🔎 "+name);
+}
+
+function showModal(html,title){
+  document.getElementById("modalTitle").innerHTML=title||"🔔 แจ้งเตือน";
   if(!html){document.getElementById("overlay").classList.add("hidden");return;}
   document.getElementById("modalBody").innerHTML=html;
   document.getElementById("overlay").classList.remove("hidden");
@@ -762,7 +841,7 @@ function deriveFromDB(){
     const p=DB.po[code]; let tot=0;
     Object.values(p.m).forEach(v=>tot+=v);
     store.po[code]={imported:tot,cost:p.co||0,byMonth:p.m||{},name:p.n||"",
-                    vendor:primaryVendor(code),vendors:p.vs||{}};
+                    vendor:primaryVendor(code),vendors:p.vs||{},history:p.h||[]};
   });
 }
 
@@ -794,7 +873,12 @@ function delSalesMonth(k){
 function delPoMonth(k){
   const lbl=k==="unknown"?"ไม่ทราบเดือน":monthLabel(k);
   if(!confirm("ลบข้อมูลนำเข้า (PO) เดือน "+lbl+" ออกจากคลังข้อมูล?")) return;
-  Object.keys(DB.po).forEach(c=>{ delete DB.po[c].m[k]; if(!Object.keys(DB.po[c].m).length) delete DB.po[c]; });
+  Object.keys(DB.po).forEach(c=>{
+    delete DB.po[c].m[k];
+    if(DB.po[c].h) DB.po[c].h=DB.po[c].h.filter(x=>x.k!==k);
+    if(DB.po[c].vs){ DB.po[c].vs={}; (DB.po[c].h||[]).forEach(x=>{ if(x.v){const v=DB.po[c].vs[x.v]||(DB.po[c].vs[x.v]={q:0,l:null}); v.q+=x.q; if(x.k&&(!v.l||x.k>v.l))v.l=x.k;} }); }
+    if(!Object.keys(DB.po[c].m).length) delete DB.po[c];
+  });
   Object.keys(DB.poDocs).forEach(d=>{ if(DB.poDocs[d]===k) delete DB.poDocs[d]; });
   afterVaultChange();
 }
@@ -889,6 +973,9 @@ document.getElementById("runBtn").onclick=()=>{
   if(alerts) showModal(alerts);
 };
 document.getElementById("search").addEventListener("input",()=>{if(lastResult)renderTable(lastResult.res,lastResult.best);});
+document.getElementById("tableArea").addEventListener("click",e=>{
+  const tr=e.target.closest("tr[data-code]"); if(tr&&tr.dataset.code) showProductDetail(tr.dataset.code);
+});
 document.getElementById("exportBtn").onclick=()=>{if(lastResult)exportExcel(lastResult.res,lastResult.best);};
 document.getElementById("closeModal").onclick=()=>showModal(null);
 document.getElementById("overlay").addEventListener("click",e=>{if(e.target.id==="overlay")showModal(null);});
