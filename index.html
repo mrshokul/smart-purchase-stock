@@ -727,8 +727,12 @@ function showProductDetail(code){
   Object.keys(bm).forEach(k=>{soldTotal+=bm[k]; if(bm[k]>0&&(!lastSale||k>lastSale))lastSale=k;});
   const avgMonthly=soldTotal/nMonths;
 
-  // นำเข้า
+  // นำเข้า — ใช้ประวัติละเอียด (ของใหม่) ถ้ามี; ถ้าไม่มีให้ย้อนใช้ยอดรายเดือน (ของเก่า)
   const hist=((po&&po.history)||[]).slice().sort((a,b)=>(b.k||"").localeCompare(a.k||"")||(b.d||"").localeCompare(a.d||""));
+  const poByMonth=(po&&po.byMonth)||{};
+  const poMonthKeys=Object.keys(poByMonth).sort().reverse();
+  const detailed=hist.length>0;
+  const importEvents=detailed?hist.length:poMonthKeys.length;
   const imported=po?po.imported:0;
   const pctSold=imported>0?(soldTotal/imported*100):null;
   const q=st?(st.qty<0?st.qty:Math.ceil(st.qty)):null;
@@ -741,7 +745,7 @@ function showProductDetail(code){
       ${kpi("ราคาทุน/ชิ้น",cost?money(cost):"-")}
       ${kpi("ราคาขาย",st&&st.price?money(st.price):"-")}
       ${kpi("นำเข้ารวม",fmt(imported)+" ชิ้น")}
-      ${kpi("นำเข้าทั้งหมด",hist.length+" ครั้ง")}
+      ${kpi("นำเข้าทั้งหมด",importEvents+(detailed?" ครั้ง":" เดือน"))}
       ${kpi("ขายได้รวม",fmt(soldTotal)+" ชิ้น")}
       ${kpi("ขายเฉลี่ย/เดือน",fmtM(avgMonthly))}
       ${kpi("%ขายออก",pctSold==null?"-":pctSold.toFixed(0)+"%")}
@@ -750,15 +754,22 @@ function showProductDetail(code){
     </div>`;
 
   // ประวัตินำเข้า
-  html+=`<div class="dsec"><h4>📦 ประวัติการนำเข้า (${hist.length} ครั้ง)</h4>`;
-  if(hist.length){
-    html+=`<div class="tblwrap" style="max-height:280px"><table>
+  if(detailed){
+    html+=`<div class="dsec"><h4>📦 ประวัติการนำเข้า (${hist.length} ครั้ง)</h4>
+      <div class="tblwrap" style="max-height:280px"><table>
       <thead><tr><th>วันที่</th><th>จำนวน</th><th>ทุน/ชิ้น</th><th>ผู้ขาย</th><th>เลขที่ PO</th></tr></thead>
       <tbody>${hist.map(h=>`<tr><td>${h.d||(h.k&&h.k!=="unknown"?monthLabel(h.k):"-")}</td>
         <td class="num">${fmt(h.q)}</td><td class="num">${h.c?fmtM(h.c):"-"}</td>
-        <td class="muted">${h.v||"-"}</td><td class="muted">${h.po||"-"}</td></tr>`).join("")}</tbody></table></div>`;
-  } else html+=`<div class="dhint">ยังไม่มีประวัติการนำเข้าในคลังข้อมูล (อัปไฟล์ PO เพิ่ม)</div>`;
-  html+=`</div>`;
+        <td class="muted">${h.v||"-"}</td><td class="muted">${h.po||"-"}</td></tr>`).join("")}</tbody></table></div></div>`;
+  } else if(poMonthKeys.length){
+    html+=`<div class="dsec"><h4>📦 ประวัติการนำเข้า (รายเดือน ${poMonthKeys.length} เดือน)</h4>
+      <div class="tblwrap" style="max-height:280px"><table>
+      <thead><tr><th>เดือน</th><th>จำนวนนำเข้า (ชิ้น)</th></tr></thead>
+      <tbody>${poMonthKeys.map(k=>`<tr><td>${k==="unknown"?"ไม่ทราบเดือน":monthLabel(k)}</td><td class="num">${fmt(poByMonth[k])}</td></tr>`).join("")}</tbody></table></div>
+      <div class="dhint">ℹ️ ข้อมูลชุดนี้อัปไว้ก่อนมีระบบเก็บรายละเอียด จึงเห็นเป็นยอดรวมรายเดือน — ไฟล์ PO ที่อัปหลังจากนี้จะแสดงวันที่/ผู้ขาย/เลขที่ใบครบทีละครั้ง</div></div>`;
+  } else {
+    html+=`<div class="dsec"><h4>📦 ประวัติการนำเข้า</h4><div class="dhint">ยังไม่มีข้อมูลการนำเข้าในคลัง (อัปไฟล์ PO เพิ่ม)</div></div>`;
+  }
 
   // ประวัติยอดขายรายเดือน
   const sm=Object.keys(bm).sort().reverse();
