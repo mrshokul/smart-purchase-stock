@@ -381,13 +381,15 @@ function mergePO(rows){
     }
     if(c1 && !skipDoc){                                // ---- line item ----
       const code=c1, qty=toNum(r[3]), cost=toNum(r[4]);
-      if(!DB.po[code]) DB.po[code]={n:norm(r[2]),co:0,m:{},vs:{},h:[]};
+      if(!DB.po[code]) DB.po[code]={n:norm(r[2]),co:0,m:{},mc:{},vs:{},h:[]};
       const p=DB.po[code];
       if(!p.vs) p.vs={};                               // รองรับข้อมูลเก่า
       if(!p.h) p.h=[];
+      if(!p.mc) p.mc={};
       if(cost) p.co=cost;
       const k=curKey||"unknown";
       p.m[k]=(p.m[k]||0)+qty;
+      if(cost) p.mc[k]=cost;                           // ราคาทุนต่อเดือน (ใบล่าสุดของเดือนนั้นชนะ)
       p.h.push({d:curDate,k,q:qty,c:cost,v:curVendor,po:curDoc});  // ประวัตินำเข้าละเอียดต่อครั้ง
       if(curVendor){                                   // สะสมผู้ขาย + เดือนที่ซื้อล่าสุด
         const v=p.vs[curVendor]||(p.vs[curVendor]={q:0,l:null});
@@ -762,11 +764,16 @@ function showProductDetail(code){
         <td class="num">${fmt(h.q)}</td><td class="num">${h.c?fmtM(h.c):"-"}</td>
         <td class="muted">${h.v||"-"}</td><td class="muted">${h.po||"-"}</td></tr>`).join("")}</tbody></table></div></div>`;
   } else if(poMonthKeys.length){
+    const mc=(po&&po.costByMonth)||{};
+    const hasAnyMc=poMonthKeys.some(k=>mc[k]);
     html+=`<div class="dsec"><h4>📦 ประวัติการนำเข้า (รายเดือน ${poMonthKeys.length} เดือน)</h4>
       <div class="tblwrap" style="max-height:280px"><table>
-      <thead><tr><th>เดือน</th><th>จำนวนนำเข้า (ชิ้น)</th></tr></thead>
-      <tbody>${poMonthKeys.map(k=>`<tr><td>${k==="unknown"?"ไม่ทราบเดือน":monthLabel(k)}</td><td class="num">${fmt(poByMonth[k])}</td></tr>`).join("")}</tbody></table></div>
-      <div class="dhint">ℹ️ ข้อมูลชุดนี้อัปไว้ก่อนมีระบบเก็บรายละเอียด จึงเห็นเป็นยอดรวมรายเดือน — ไฟล์ PO ที่อัปหลังจากนี้จะแสดงวันที่/ผู้ขาย/เลขที่ใบครบทีละครั้ง</div></div>`;
+      <thead><tr><th>เดือน</th><th>จำนวนนำเข้า (ชิ้น)</th><th>ราคาทุน/ชิ้น</th></tr></thead>
+      <tbody>${poMonthKeys.map(k=>{
+        const c = mc[k] ? fmtM(mc[k]) : (cost? '<span class="muted">~'+fmtM(cost)+'</span>' : '-');
+        return `<tr><td>${k==="unknown"?"ไม่ทราบเดือน":monthLabel(k)}</td><td class="num">${fmt(poByMonth[k])}</td><td class="num">${c}</td></tr>`;
+      }).join("")}</tbody></table></div>
+      <div class="dhint">ℹ️ ข้อมูลชุดนี้อัปไว้ก่อนมีระบบเก็บรายละเอียด จึงเห็นเป็นยอดรวมรายเดือน — ไฟล์ PO ที่อัปหลังจากนี้จะแสดงวันที่/ผู้ขาย/เลขที่ใบครบทีละครั้ง${hasAnyMc?"":'<br>เครื่องหมาย ~ = ราคาทุนล่าสุด (ข้อมูลเก่าไม่มีราคาแยกรายเดือน)'}</div></div>`;
   } else {
     html+=`<div class="dsec"><h4>📦 ประวัติการนำเข้า</h4><div class="dhint">ยังไม่มีข้อมูลการนำเข้าในคลัง (อัปไฟล์ PO เพิ่ม)</div></div>`;
   }
@@ -899,7 +906,7 @@ function deriveFromDB(){
   Object.keys(DB.po).forEach(code=>{
     const p=DB.po[code]; let tot=0;
     Object.values(p.m).forEach(v=>tot+=v);
-    store.po[code]={imported:tot,cost:p.co||0,byMonth:p.m||{},name:p.n||"",
+    store.po[code]={imported:tot,cost:p.co||0,byMonth:p.m||{},costByMonth:p.mc||{},name:p.n||"",
                     vendor:primaryVendor(code),vendors:p.vs||{},history:p.h||[]};
   });
 }
@@ -934,6 +941,7 @@ function delPoMonth(k){
   if(!confirm("ลบข้อมูลนำเข้า (PO) เดือน "+lbl+" ออกจากคลังข้อมูล?")) return;
   Object.keys(DB.po).forEach(c=>{
     delete DB.po[c].m[k];
+    if(DB.po[c].mc) delete DB.po[c].mc[k];
     if(DB.po[c].h) DB.po[c].h=DB.po[c].h.filter(x=>x.k!==k);
     if(DB.po[c].vs){ DB.po[c].vs={}; (DB.po[c].h||[]).forEach(x=>{ if(x.v){const v=DB.po[c].vs[x.v]||(DB.po[c].vs[x.v]={q:0,l:null}); v.q+=x.q; if(x.k&&(!v.l||x.k>v.l))v.l=x.k;} }); }
     if(!Object.keys(DB.po[c].m).length) delete DB.po[c];
