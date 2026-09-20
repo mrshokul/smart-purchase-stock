@@ -330,7 +330,8 @@ function ensureToken(){
     if(!gTokenClient){ gTokenClient=google.accounts.oauth2.initTokenClient({client_id:GDRIVE_CLIENT_ID,scope:GDRIVE_SCOPE,callback:()=>{}}); }
     gTokenClient.callback=(resp)=>{ if(resp&&resp.access_token){gToken=resp.access_token;gTokenExp=Date.now()+((resp.expires_in||3600)*1000)-60000;res(gToken);} else rej(new Error("ขอสิทธิ์ไม่สำเร็จ")); };
     gTokenClient.error_callback=(err)=>rej(new Error((err&&err.message)||"เชื่อมไม่สำเร็จ"));
-    try{ gTokenClient.requestAccessToken({prompt: gConnected?"":"consent"}); }catch(e){ rej(e); }
+    let granted=false; try{granted=localStorage.getItem("gdrive_on")==="1";}catch(e){}
+    try{ gTokenClient.requestAccessToken({prompt:(gConnected||granted)?"":"consent"}); }catch(e){ rej(e); }
   });
 }
 async function driveFindFile(){
