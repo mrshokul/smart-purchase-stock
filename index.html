@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ระบบคำนวณอัจฉริยะเพื่อการจัดซื้อและขจัดสินค้าค้างสต็อก</title>
 <script src="xlsx.full.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root{
     --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --line:#334155;
@@ -140,6 +141,11 @@
   .pill.good{background:#14532d;color:#bbf7d0}
   .pill.mid{background:#78350f;color:#fed7aa}
   .pill.bad2{background:#7f1d1d;color:#fecaca}
+  /* google drive */
+  .dstat{font-size:13px;padding:9px 13px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);display:inline-block}
+  .dstat.on{border-color:#16a34a;color:#bbf7d0}
+  .dstat.busy{border-color:var(--accent);color:var(--accent2)}
+  .dstat.err{border-color:#7f1d1d;color:#fca5a5}
 </style>
 </head>
 <body>
@@ -197,6 +203,19 @@ export_purchase_2025_07.xlsx     ← PO</div>
       <input id="restoreInput" type="file" accept=".json,application/json" class="hidden">
     </div>
     <div class="note">ข้อมูลถูกจำไว้ในเบราว์เซอร์เครื่องนี้เท่านั้น (ไม่ได้ส่งขึ้นเซิร์ฟเวอร์) · ถ้าจะย้ายเครื่องหรือกลัวแคชถูกล้าง ให้กด "สำรองเป็นไฟล์" เก็บไว้</div>
+  </div>
+
+  <!-- Google Drive sync -->
+  <div class="card">
+    <h2>☁️ ซิงก์ข้อมูลกับ Google Drive (เปิดใช้เครื่องไหนก็ได้)</h2>
+    <div id="driveStatus" class="dstat">ยังไม่ได้เชื่อม Google Drive</div>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="run" id="driveConnectBtn" style="background:linear-gradient(90deg,#2563eb,#0ea5e9)">🔗 เชื่อม Google Drive</button>
+      <button class="ghost" id="drivePushBtn" disabled>⬆️ บันทึกขึ้น Drive เดี๋ยวนี้</button>
+      <button class="ghost" id="drivePullBtn" disabled>⬇️ ดึงจาก Drive</button>
+      <button class="ghost" id="driveDisconnectBtn" style="display:none;border-color:#7f1d1d;color:#fca5a5">ยกเลิกการเชื่อม</button>
+    </div>
+    <div class="note">ข้อมูลจะถูกเก็บเป็นไฟล์เดียวใน Google Drive ของคุณ (แอปเห็นเฉพาะไฟล์นี้ไฟล์เดียว) · เชื่อมแล้วข้อมูลจะ sync อัตโนมัติทุกครั้งที่อัปโหลด/แก้ไข · เปิดแอปเครื่องอื่นแล้วกดเชื่อมบัญชีเดิม ข้อมูลจะตามมาให้ · ใช้ได้เฉพาะเปิดผ่านลิงก์เว็บ (ไม่ใช่เปิดไฟล์ในเครื่อง)</div>
   </div>
 
   <!-- ค้นหาสินค้าเจาะจง -->
@@ -276,8 +295,11 @@ function loadDB(){
   catch(e){console.warn("โหลดคลังข้อมูลไม่ได้",e);}
 }
 function saveDB(){
-  try{localStorage.setItem(LS_KEY,JSON.stringify(DB)); return true;}
+  DB.savedAt=Date.now();
+  try{localStorage.setItem(LS_KEY,JSON.stringify(DB));}
   catch(e){console.warn("บันทึกคลังข้อมูลไม่ได้",e); return false;}
+  scheduleDriveSync();
+  return true;
 }
 function dbSalesMonths(){const s=new Set();Object.values(DB.sales).forEach(p=>Object.keys(p.m).forEach(k=>s.add(k)));return [...s].sort();}
 function dbPoMonths(){const s=new Set();Object.values(DB.po).forEach(p=>Object.keys(p.m).forEach(k=>s.add(k)));return [...s].sort();}
@@ -292,6 +314,157 @@ function monthKeyFromDate(v){
   m=s.match(/^(\d{4})[\/\-.](\d{1,2})/);                              // YYYY-MM-DD
   if(m) return m[1]+"-"+String(+m[2]).padStart(2,"0");
   return null;
+}
+
+/* ============ Google Drive sync ============ */
+const GDRIVE_CLIENT_ID="898881930485-9jftsi9ghquaco8bmrk8tf6tabfsv7sj.apps.googleusercontent.com";
+const GDRIVE_SCOPE="https://www.googleapis.com/auth/drive.file";
+const GDRIVE_FILENAME="smart-purchase-stock-db.json";
+let gToken=null,gTokenExp=0,gTokenClient=null,gFileId=null,gConnected=false,gSyncTimer=null,gUserEmail="",gLastSync=0,gSyncing=false;
+
+function gisReady(){ return typeof google!=="undefined" && google.accounts && google.accounts.oauth2; }
+function ensureToken(){
+  return new Promise((res,rej)=>{
+    if(gToken && Date.now()<gTokenExp){ res(gToken); return; }
+    if(!gisReady()){ rej(new Error("Google ยังโหลดไม่เสร็จ ลองใหม่อีกครั้ง")); return; }
+    if(!gTokenClient){ gTokenClient=google.accounts.oauth2.initTokenClient({client_id:GDRIVE_CLIENT_ID,scope:GDRIVE_SCOPE,callback:()=>{}}); }
+    gTokenClient.callback=(resp)=>{ if(resp&&resp.access_token){gToken=resp.access_token;gTokenExp=Date.now()+((resp.expires_in||3600)*1000)-60000;res(gToken);} else rej(new Error("ขอสิทธิ์ไม่สำเร็จ")); };
+    gTokenClient.error_callback=(err)=>rej(new Error((err&&err.message)||"เชื่อมไม่สำเร็จ"));
+    try{ gTokenClient.requestAccessToken({prompt: gConnected?"":"consent"}); }catch(e){ rej(e); }
+  });
+}
+async function driveFindFile(){
+  const t=await ensureToken();
+  const q=encodeURIComponent("name='"+GDRIVE_FILENAME+"' and trashed=false");
+  const r=await fetch("https://www.googleapis.com/drive/v3/files?q="+q+"&spaces=drive&fields=files(id,modifiedTime)&pageSize=1",{headers:{Authorization:"Bearer "+t}});
+  if(!r.ok) throw new Error("อ่านรายการไฟล์ไม่ได้ ("+r.status+")");
+  const d=await r.json(); gFileId=(d.files&&d.files[0])?d.files[0].id:null; return gFileId;
+}
+async function driveDownload(){
+  if(!gFileId) return null;
+  const t=await ensureToken();
+  const r=await fetch("https://www.googleapis.com/drive/v3/files/"+gFileId+"?alt=media",{headers:{Authorization:"Bearer "+t}});
+  if(!r.ok) return null;
+  try{ return await r.json(); }catch(e){ return null; }
+}
+async function driveUpload(obj){
+  const t=await ensureToken();
+  const content=JSON.stringify(obj);
+  if(gFileId){
+    const r=await fetch("https://www.googleapis.com/upload/drive/v3/files/"+gFileId+"?uploadType=media",
+      {method:"PATCH",headers:{Authorization:"Bearer "+t,"Content-Type":"application/json"},body:content});
+    if(!r.ok) throw new Error("บันทึกขึ้น Drive ไม่ได้ ("+r.status+")");
+  } else {
+    const boundary="ssb"+Date.now();
+    const meta={name:GDRIVE_FILENAME,mimeType:"application/json"};
+    const body="--"+boundary+"\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"+JSON.stringify(meta)+
+      "\r\n--"+boundary+"\r\nContent-Type: application/json\r\n\r\n"+content+"\r\n--"+boundary+"--";
+    const r=await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
+      {method:"POST",headers:{Authorization:"Bearer "+t,"Content-Type":"multipart/related; boundary="+boundary},body});
+    if(!r.ok) throw new Error("สร้างไฟล์บน Drive ไม่ได้ ("+r.status+")");
+    const d=await r.json(); gFileId=d.id;
+  }
+}
+async function fetchDriveEmail(){
+  try{ const t=await ensureToken();
+    const r=await fetch("https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)",{headers:{Authorization:"Bearer "+t}});
+    if(r.ok){ const d=await r.json(); gUserEmail=(d.user&&d.user.emailAddress)||""; updateDriveStatus(); }
+  }catch(e){}
+}
+function localHasData(){ return Object.keys(DB.sales).length>0 || Object.keys(DB.po).length>0; }
+
+async function driveConnect(){
+  try{
+    updateDriveStatus("busy","กำลังเชื่อม Google Drive...");
+    await ensureToken();
+    gConnected=true; try{localStorage.setItem("gdrive_on","1");}catch(e){}
+    await driveSyncOnConnect();
+    fetchDriveEmail();
+    updateDriveStatus();
+  }catch(e){ gConnected=false; updateDriveStatus("err","เชื่อมไม่สำเร็จ: "+(e.message||e)); }
+}
+async function driveSyncOnConnect(){
+  await driveFindFile();
+  const remote=await driveDownload();
+  if(remote && (remote.sales||remote.po)){
+    const rAt=remote.savedAt||0, lAt=DB.savedAt||0;
+    if(!localHasData() || rAt>lAt){
+      DB={sales:remote.sales||{},po:remote.po||{},poDocs:remote.poDocs||{},savedAt:remote.savedAt||Date.now()};
+      try{localStorage.setItem(LS_KEY,JSON.stringify(DB));}catch(e){}
+      deriveFromDB(); renderVault(); refreshMonthPickers(); updateSummary(); runProdSearch();
+      gLastSync=Date.now(); updateDriveStatus("on","โหลดข้อมูลจาก Drive แล้ว");
+    } else if(lAt>rAt){
+      await driveUpload(DB); gLastSync=Date.now(); updateDriveStatus("on","อัปข้อมูลเครื่องนี้ขึ้น Drive แล้ว");
+    } else { gLastSync=Date.now(); }
+  } else {
+    if(localHasData()){ await driveUpload(DB); }
+    gLastSync=Date.now();
+  }
+}
+function scheduleDriveSync(){
+  if(!gConnected) return;
+  if(gSyncTimer) clearTimeout(gSyncTimer);
+  updateDriveStatus("busy","มีการเปลี่ยนแปลง กำลังจะ sync...");
+  gSyncTimer=setTimeout(doDriveSync,2500);
+}
+async function doDriveSync(){
+  if(!gConnected||gSyncing) return;
+  gSyncing=true;
+  try{ updateDriveStatus("busy","กำลัง sync ขึ้น Drive..."); await driveUpload(DB); gLastSync=Date.now(); updateDriveStatus(); }
+  catch(e){ updateDriveStatus("err","sync ไม่สำเร็จ: "+(e.message||e)); }
+  finally{ gSyncing=false; }
+}
+async function drivePushNow(){
+  if(!gConnected) return;
+  try{ updateDriveStatus("busy","กำลังบันทึกขึ้น Drive..."); await driveUpload(DB); gLastSync=Date.now(); updateDriveStatus("on","บันทึกขึ้น Drive แล้ว"); }
+  catch(e){ updateDriveStatus("err","บันทึกไม่สำเร็จ: "+(e.message||e)); }
+}
+async function drivePullNow(){
+  if(!gConnected) return;
+  if(!confirm("ดึงข้อมูลจาก Drive มาแทนที่ข้อมูลในเครื่องนี้?")) return;
+  try{
+    updateDriveStatus("busy","กำลังดึงจาก Drive...");
+    await driveFindFile();
+    const remote=await driveDownload();
+    if(remote && (remote.sales||remote.po)){
+      DB={sales:remote.sales||{},po:remote.po||{},poDocs:remote.poDocs||{},savedAt:remote.savedAt||Date.now()};
+      try{localStorage.setItem(LS_KEY,JSON.stringify(DB));}catch(e){}
+      deriveFromDB(); renderVault(); refreshMonthPickers(); updateSummary(); runProdSearch();
+      gLastSync=Date.now(); updateDriveStatus("on","ดึงข้อมูลจาก Drive แล้ว");
+    } else { updateDriveStatus("on","ยังไม่มีไฟล์ข้อมูลบน Drive"); }
+  }catch(e){ updateDriveStatus("err","ดึงไม่สำเร็จ: "+(e.message||e)); }
+}
+function driveDisconnect(){
+  try{ if(gToken && gisReady() && google.accounts.oauth2.revoke) google.accounts.oauth2.revoke(gToken,()=>{}); }catch(e){}
+  gToken=null;gTokenExp=0;gConnected=false;gUserEmail="";gFileId=null;
+  try{localStorage.removeItem("gdrive_on");}catch(e){}
+  updateDriveStatus();
+}
+function updateDriveStatus(cls,msg){
+  const el=document.getElementById("driveStatus"); if(!el) return;
+  const cBtn=document.getElementById("driveConnectBtn"), push=document.getElementById("drivePushBtn"),
+        pull=document.getElementById("drivePullBtn"), dis=document.getElementById("driveDisconnectBtn");
+  el.className="dstat"+(cls?(" "+cls):(gConnected?" on":""));
+  if(msg){ el.textContent=msg; }
+  else if(gConnected){
+    const who=gUserEmail?(" ("+gUserEmail+")"):"";
+    const last=gLastSync?(" · sync ล่าสุด "+new Date(gLastSync).toLocaleTimeString("th-TH")):"";
+    el.textContent="✓ เชื่อม Google Drive แล้ว"+who+last;
+  } else { el.textContent="ยังไม่ได้เชื่อม Google Drive"; }
+  if(cBtn) cBtn.style.display=gConnected?"none":"";
+  if(dis) dis.style.display=gConnected?"":"none";
+  if(push) push.disabled=!gConnected;
+  if(pull) pull.disabled=!gConnected;
+}
+function driveAutoConnect(){
+  let on=false; try{on=localStorage.getItem("gdrive_on")==="1";}catch(e){}
+  if(!on) return;
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    if(gisReady()){ clearInterval(iv); gConnected=true; driveSyncOnConnect().then(()=>{fetchDriveEmail();updateDriveStatus();}).catch(e=>{gConnected=false;updateDriveStatus("err","เชื่อมอัตโนมัติไม่สำเร็จ กดเชื่อมอีกครั้ง");}); }
+    else if(tries>40){ clearInterval(iv); }
+  },250);
 }
 
 /* ---------- file type detection from filename ---------- */
@@ -1067,8 +1240,15 @@ document.getElementById("clearBtn").onclick=clearDB;
 document.getElementById("restoreBtn").onclick=()=>document.getElementById("restoreInput").click();
 document.getElementById("restoreInput").addEventListener("change",e=>{ if(e.target.files[0]) restoreDB(e.target.files[0]); e.target.value=""; });
 
+/* google drive buttons */
+document.getElementById("driveConnectBtn").onclick=driveConnect;
+document.getElementById("driveDisconnectBtn").onclick=driveDisconnect;
+document.getElementById("drivePushBtn").onclick=drivePushNow;
+document.getElementById("drivePullBtn").onclick=drivePullNow;
+
 /* ---- startup: โหลดคลังข้อมูลที่จำไว้ ---- */
 loadDB(); deriveFromDB(); renderVault(); refreshMonthPickers(); updateSummary(); runProdSearch();
+updateDriveStatus(); driveAutoConnect();
 </script>
 </body>
 </html>
