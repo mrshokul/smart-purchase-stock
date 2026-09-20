@@ -462,7 +462,7 @@ function driveAutoConnect(){
   let tries=0;
   const iv=setInterval(()=>{
     tries++;
-    if(gisReady()){ clearInterval(iv); gConnected=true; driveSyncOnConnect().then(()=>{fetchDriveEmail();updateDriveStatus();}).catch(e=>{gConnected=false;updateDriveStatus("err","เชื่อมอัตโนมัติไม่สำเร็จ กดเชื่อมอีกครั้ง");}); }
+    if(gisReady()){ clearInterval(iv); gConnected=true; driveSyncOnConnect().then(()=>{fetchDriveEmail();updateDriveStatus();}).catch(e=>{gConnected=false;updateDriveStatus("","💡 กดปุ่ม \"เชื่อม Google Drive\" 1 ครั้งเพื่อดึงข้อมูลและเปิด sync");}); }
     else if(tries>40){ clearInterval(iv); }
   },250);
 }
