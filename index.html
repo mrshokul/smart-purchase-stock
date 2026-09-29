@@ -199,6 +199,7 @@ export_purchase_2025_07.xlsx     ← PO</div>
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="ghost" id="backupBtn">💾 สำรองเป็นไฟล์</button>
       <button class="ghost" id="restoreBtn">📂 กู้คืนจากไฟล์</button>
+      <button class="ghost" id="clearPoBtn" style="border-color:#a16207;color:#fde68a">🗑 ล้างเฉพาะ PO</button>
       <button class="ghost" id="clearBtn" style="border-color:#7f1d1d;color:#fca5a5">🗑 ล้างคลังข้อมูลทั้งหมด</button>
       <input id="restoreInput" type="file" accept=".json,application/json" class="hidden">
     </div>
@@ -314,6 +315,16 @@ function monthKeyFromDate(v){
   m=s.match(/^(\d{4})[\/\-.](\d{1,2})/);                              // YYYY-MM-DD
   if(m) return m[1]+"-"+String(+m[2]).padStart(2,"0");
   return null;
+}
+/* วันที่ -> คีย์เรียงลำดับ YYYYMMDD (ใช้หา PO ล่าสุดตามวันที่) */
+function dateSortKey(v){
+  if(v==null||v==="") return "";
+  const s=String(v).trim();
+  let m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);          // DD/MM/YYYY
+  if(m) return m[3]+String(+m[2]).padStart(2,"0")+String(+m[1]).padStart(2,"0");
+  m=s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);              // YYYY-MM-DD
+  if(m) return m[1]+String(+m[2]).padStart(2,"0")+String(+m[3]).padStart(2,"0");
+  return "";
 }
 
 /* ============ Google Drive sync ============ */
@@ -560,10 +571,16 @@ function mergePO(rows){
       if(!p.vs) p.vs={};                               // รองรับข้อมูลเก่า
       if(!p.h) p.h=[];
       if(!p.mc) p.mc={};
-      if(cost) p.co=cost;
+      if(!p.mcDate) p.mcDate={};
       const k=curKey||"unknown";
+      const dk=dateSortKey(curDate);                   // วันที่แบบเรียงได้ (YYYYMMDD)
       p.m[k]=(p.m[k]||0)+qty;
-      if(cost) p.mc[k]=cost;                           // ราคาทุนต่อเดือน (ใบล่าสุดของเดือนนั้นชนะ)
+      if(cost){
+        // ต้นทุนหลัก = ใบ PO ล่าสุดตามวันที่ (ไม่ใช่ตามลำดับไฟล์)
+        if(!p.coDate || dk>=p.coDate){ p.co=cost; p.coDate=dk; }
+        // ต้นทุนรายเดือน = ใบล่าสุดของเดือนนั้นตามวันที่
+        if(!p.mcDate[k] || dk>=p.mcDate[k]){ p.mc[k]=cost; p.mcDate[k]=dk; }
+      }
       p.h.push({d:curDate,k,q:qty,c:cost,v:curVendor,po:curDoc});  // ประวัตินำเข้าละเอียดต่อครั้ง
       if(curVendor){                                   // สะสมผู้ขาย + เดือนที่ซื้อล่าสุด
         const v=p.vs[curVendor]||(p.vs[curVendor]={q:0,l:null});
@@ -1123,6 +1140,11 @@ function delPoMonth(k){
   Object.keys(DB.poDocs).forEach(d=>{ if(DB.poDocs[d]===k) delete DB.poDocs[d]; });
   afterVaultChange();
 }
+function clearPO(){
+  if(!confirm("ล้างเฉพาะข้อมูลการนำเข้า (PO) ที่จำไว้ทั้งหมด?\nยอดขายจะยังอยู่ครบ · ใช้ก่อนอัปไฟล์ PO ใหม่เพื่อให้ราคาทุนรายเดือนถูกต้อง\nแนะนำให้กด 'สำรองเป็นไฟล์' ก่อน")) return;
+  DB.po={}; DB.poDocs={};
+  afterVaultChange();
+}
 function clearDB(){
   if(!confirm("ล้างคลังข้อมูลทั้งหมด (ยอดขายและ PO ที่จำไว้)?\nการกระทำนี้ย้อนกลับไม่ได้ — แนะนำให้กด 'สำรองเป็นไฟล์' ก่อน")) return;
   DB={sales:{},po:{},poDocs:{}};
@@ -1237,6 +1259,7 @@ document.getElementById("closeModal").onclick=()=>showModal(null);
 document.getElementById("overlay").addEventListener("click",e=>{if(e.target.id==="overlay")showModal(null);});
 /* vault buttons */
 document.getElementById("backupBtn").onclick=backupDB;
+document.getElementById("clearPoBtn").onclick=clearPO;
 document.getElementById("clearBtn").onclick=clearDB;
 document.getElementById("restoreBtn").onclick=()=>document.getElementById("restoreInput").click();
 document.getElementById("restoreInput").addEventListener("change",e=>{ if(e.target.files[0]) restoreDB(e.target.files[0]); e.target.value=""; });
