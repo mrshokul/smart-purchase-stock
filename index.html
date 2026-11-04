@@ -290,9 +290,10 @@ let lastResult=null;
    DB.po[code]    = {n:ชื่อ, co:ทุน, m:{'YYYY-MM':จำนวนที่นำเข้า}}
    DB.poDocs[po_code] = 'YYYY-MM'   ← กันนับซ้ำเมื่ออัปไฟล์ PO ใบเดิมอีกรอบ */
 const LS_KEY="smartstock_db_v1";
-let DB={sales:{},po:{},poDocs:{}};
+let DB={sales:{},po:{},poDocs:{},disc:[]};
+let DISC=new Set();                         // รหัสสินค้าที่ทำเครื่องหมาย "เลิกขาย" เอง
 function loadDB(){
-  try{const s=localStorage.getItem(LS_KEY); if(s){const d=JSON.parse(s); DB={sales:d.sales||{},po:d.po||{},poDocs:d.poDocs||{}};}}
+  try{const s=localStorage.getItem(LS_KEY); if(s){const d=JSON.parse(s); DB={sales:d.sales||{},po:d.po||{},poDocs:d.poDocs||{},disc:d.disc||[]};}}
   catch(e){console.warn("โหลดคลังข้อมูลไม่ได้",e);}
 }
 function saveDB(){
@@ -401,7 +402,7 @@ async function driveSyncOnConnect(){
   if(remote && (remote.sales||remote.po)){
     const rAt=remote.savedAt||0, lAt=DB.savedAt||0;
     if(!localHasData() || rAt>lAt){
-      DB={sales:remote.sales||{},po:remote.po||{},poDocs:remote.poDocs||{},savedAt:remote.savedAt||Date.now()};
+      DB={sales:remote.sales||{},po:remote.po||{},poDocs:remote.poDocs||{},disc:remote.disc||[],savedAt:remote.savedAt||Date.now()};
       try{localStorage.setItem(LS_KEY,JSON.stringify(DB));}catch(e){}
       deriveFromDB(); renderVault(); refreshMonthPickers(); updateSummary(); runProdSearch();
       gLastSync=Date.now(); updateDriveStatus("on","โหลดข้อมูลจาก Drive แล้ว");
@@ -439,7 +440,7 @@ async function drivePullNow(){
     await driveFindFile();
     const remote=await driveDownload();
     if(remote && (remote.sales||remote.po)){
-      DB={sales:remote.sales||{},po:remote.po||{},poDocs:remote.poDocs||{},savedAt:remote.savedAt||Date.now()};
+      DB={sales:remote.sales||{},po:remote.po||{},poDocs:remote.poDocs||{},disc:remote.disc||[],savedAt:remote.savedAt||Date.now()};
       try{localStorage.setItem(LS_KEY,JSON.stringify(DB));}catch(e){}
       deriveFromDB(); renderVault(); refreshMonthPickers(); updateSummary(); runProdSearch();
       gLastSync=Date.now(); updateDriveStatus("on","ดึงข้อมูลจาก Drive แล้ว");
@@ -624,7 +625,7 @@ function compute(targetM,growthPct){
   // union of product codes across sales/stock/po
   const codes=new Set([...Object.keys(store.sales),...Object.keys(store.stock||{}),...Object.keys(store.po)]);
 
-  const res={reorder:[],dead:[],stuck:[],review:[],anomaly:[],sellthru:[],stuckValue:0};
+  const res={reorder:[],dead:[],stuck:[],review:[],anomaly:[],sellthru:[],discontinued:[],stuckValue:0};
 
   codes.forEach(code=>{
     const sa=store.sales[code], st=store.stock?store.stock[code]:null, po=store.po[code];
@@ -704,6 +705,14 @@ function compute(targetM,growthPct){
       const val=qty*cost; res.stuck.push({...base,value:val}); res.stuckValue+=val;
     }
 
+    // ---- สินค้าเลิกจำหน่าย (ตัดออกจากการแนะนำสั่งซื้อ) ----
+    const di=discInfo(code);
+    if(di.disc){
+      res.discontinued.push({...base, manual:di.manual, auto:di.auto, monthsSinceImport:di.ms, lastImport:di.lastImport,
+        reason: di.manual?"ทำเครื่องหมายเลิกขายเอง":("ไม่นำเข้า "+di.ms+" เดือน (เกิน "+DISC_MONTHS+")")});
+      return;   // ไม่แนะนำให้สั่งซื้อสินค้าที่เลิกจำหน่าย
+    }
+
     // ---- Reorder recommendation (M2) ----
     if(!hasHistory){
       if(soldTotal>0) res.review.push({...base,reason:"ไม่มีประวัติขายเดือน "+THMONTHS[targetM]+" ในปีก่อน — รอพิจารณา"});  // M10 (เฉพาะที่เคยมียอดขาย)
@@ -717,6 +726,7 @@ function compute(targetM,growthPct){
   res.dead.sort((a,b)=>b.qty*b.cost-a.qty*a.cost);
   res.stuck.sort((a,b)=>b.value-a.value);
   res.sellthru.sort((a,b)=>a.pctSold-b.pctSold);   // แย่สุด (ขายไม่ออก) ขึ้นก่อน
+  res.discontinued.sort((a,b)=>(b.monthsSinceImport||0)-(a.monthsSinceImport||0));
   return res;
 }
 
@@ -727,6 +737,7 @@ function bestSellers(fromKey,toKey){
     const s=store.sales[code];
     const cat=(store.stock&&store.stock[code]?store.stock[code].category:s.category)||"";
     if(isPO(cat)) return;
+    if(discInfo(code).disc) return;           // ไม่รวมสินค้าที่อาจเลิกจำหน่าย
     let sum=0;
     Object.keys(s.byMonth).forEach(k=>{ if((!fromKey||k>=fromKey)&&(!toKey||k<=toKey)) sum+=s.byMonth[k]; });
     if(sum>0) list.push({code,name:s.name,category:cat,sold:sum});
@@ -751,6 +762,7 @@ function render(res,best){
     <div class="kpi purple"><div class="l">🕓 ของค้าง (MoS>6)</div><div class="n">${fmt(res.stuck.length)}</div></div>
     <div class="kpi blue"><div class="l">📋 รอพิจารณา / ข้อมูลไม่ครบ</div><div class="n">${fmt(res.review.length)}</div></div>
     <div class="kpi red"><div class="l">📦 นำเข้าแล้วขายไม่ออก (&lt;30%)</div><div class="n">${fmt(res.sellthru.filter(x=>x.pctSold<0.3).length)}</div></div>
+    <div class="kpi amber"><div class="l">🚫 อาจเลิกจำหน่าย</div><div class="n">${fmt(res.discontinued.length)}</div></div>
     <div class="kpi"><div class="l">🔴 ข้อมูลผิดปกติ</div><div class="n">${fmt(res.anomaly.length)}</div></div>`;
   // tabs
   const tabDefs=[
@@ -761,6 +773,7 @@ function render(res,best){
     ["dead","⚠️ Dead Stock",res.dead.length],
     ["stuck","🕓 เงินจม",res.stuck.length],
     ["review","📋 รอพิจารณา",res.review.length],
+    ["discontinued","🚫 อาจเลิกจำหน่าย",res.discontinued.length],
     ["anomaly","🔴 ผิดปกติ",res.anomaly.length],
   ];
   document.getElementById("tabs").innerHTML=tabDefs.map(t=>
@@ -843,6 +856,13 @@ function renderTable(res,best){
     html=tableHTML(["รหัส","ชื่อสินค้า","คงเหลือ","เหตุผล"],flt(res.review),r=>
       `<tr data-code="${r.code}"><td>${r.code}</td><td>${r.name}</td><td class="num">${r.qty==null?'-':fmt(r.qty)}</td>
        <td><span class="pill review">${r.reason}</span></td></tr>`);
+  } else if(currentTab==="discontinued"){
+    html=`<div class="note" style="margin-bottom:8px">สินค้าที่ <b>อาจเลิกจำหน่าย</b> — ถูกตัดออกจาก "ควรสั่งซื้อ" และ Popup เตือนแล้ว · 🟡 = ระบบสงสัย (ไม่นำเข้าเกิน ${DISC_MONTHS} เดือน ให้คนยืนยัน) · 🔴 = ทำเครื่องหมายเลิกขายเอง · คลิกแถวเพื่อดู/ยกเลิกเครื่องหมาย</div>`+
+    tableHTML(["รหัส","ชื่อสินค้า","คงเหลือ","นำเข้าล่าสุด","ไม่นำเข้า(เดือน)","มูลค่าคงเหลือ","สถานะ"],flt(res.discontinued),r=>
+      `<tr data-code="${r.code}"><td>${r.code}</td><td>${r.name}</td><td class="num">${r.qty==null?'-':fmt(r.qty)}</td>
+       <td>${r.lastImport?monthLabel(r.lastImport):'-'}</td><td class="num">${r.monthsSinceImport==null?'-':r.monthsSinceImport}</td>
+       <td class="num">${money((r.qty||0)*(r.cost||0))}</td>
+       <td><span class="pill ${r.manual?'dead':'stuck'}">${r.manual?'🔴 เลิกขาย (ยืนยันแล้ว)':'🟡 อาจเลิก — รอยืนยัน'}</span></td></tr>`);
   } else if(currentTab==="anomaly"){
     html=tableHTML(["รหัส","ชื่อสินค้า","หมวด","เหตุผล"],flt(res.anomaly),r=>
       `<tr data-code="${r.code}"><td>${r.code}</td><td>${r.name}</td><td class="muted">${r.category}</td>
@@ -979,6 +999,21 @@ function showProductDetail(code){
   } else html+=`<div class="dhint">ยังไม่มีข้อมูลยอดขายในคลัง</div>`;
   html+=`</div>`;
 
+  // ---- ปุ่มทำเครื่องหมายเลิกขาย ----
+  const di=discInfo(code);
+  html+=`<div class="dsec">`;
+  if(di.manual){
+    html+=`<div class="gwarn">🔴 สินค้านี้ถูกทำเครื่องหมาย <b>"เลิกขาย"</b> ไว้ — ถูกตัดออกจากการแนะนำสั่งซื้อและ Popup เตือน</div>
+      <button class="ghost" style="margin-top:8px" onclick="toggleDisc('${code}')">↩️ ยกเลิกเครื่องหมายเลิกขาย</button>`;
+  } else if(di.auto){
+    html+=`<div class="gwarn">🟡 ระบบสงสัยว่า <b>อาจเลิกจำหน่าย</b> (ไม่นำเข้า ${di.ms} เดือน) — ตัดออกจากการแนะนำแล้ว กดปุ่มด้านล่างเพื่อ<b>ยืนยันเลิกขายถาวร</b> หรือปล่อยไว้ให้ระบบเตือน</div>
+      <button class="ghost" style="margin-top:8px;border-color:#7f1d1d;color:#fca5a5" onclick="toggleDisc('${code}')">🚫 ยืนยันเลิกขาย (ตัดถาวร)</button>`;
+  } else {
+    html+=`<button class="ghost" style="border-color:#7f1d1d;color:#fca5a5" onclick="toggleDisc('${code}')">🚫 ทำเครื่องหมายเลิกขาย</button>
+      <div class="dhint">ใช้เมื่อสินค้านี้เลิกจำหน่าย/บริษัทเลิกผลิต — จะถูกตัดออกจาก "ควรสั่งซื้อ" และ Popup เตือน</div>`;
+  }
+  html+=`</div>`;
+
   showModal(html,"🔎 "+name);
 }
 
@@ -1015,6 +1050,10 @@ function exportExcel(res,best){
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s4),"เงินจม");
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s5),"รอพิจารณา");
   XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s6),"ผิดปกติ");
+  const s9=res.discontinued.map(r=>({รหัส:r.code,ชื่อสินค้า:r.name,คงเหลือ:r.qty==null?"":r.qty,
+    นำเข้าล่าสุด:r.lastImport?monthLabel(r.lastImport):"",ไม่นำเข้ากี่เดือน:r.monthsSinceImport==null?"":r.monthsSinceImport,
+    มูลค่าคงเหลือ:+((r.qty||0)*(r.cost||0)).toFixed(0),สถานะ:r.manual?"เลิกขาย (ยืนยันแล้ว)":"อาจเลิก - รอยืนยัน"}));
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s9),"อาจเลิกจำหน่าย");
   const d=new Date();
   XLSX.writeFile(wb,`ผลวิเคราะห์จัดซื้อ_${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.xlsx`);
 }
@@ -1100,6 +1139,32 @@ function deriveFromDB(){
     store.po[code]={imported:tot,cost:p.co||0,byMonth:p.m||{},costByMonth:p.mc||{},name:p.n||"",
                     vendor:primaryVendor(code),vendors:p.vs||{},history:p.h||[]};
   });
+  DISC=new Set(DB.disc||[]);
+}
+
+/* ---------- สินค้าเลิกจำหน่าย ---------- */
+const DISC_MONTHS=12;   // ไม่มี PO เกินกี่เดือน = น่าจะเลิกจำหน่าย
+function monthsSinceLastPO(code){
+  const po=store.po[code]; if(!po||!po.byMonth) return null;
+  const keys=Object.keys(po.byMonth).filter(k=>k!=="unknown").sort();
+  if(!keys.length) return null;
+  const [y,m]=keys[keys.length-1].split("-").map(Number);
+  const d=new Date(); return (d.getFullYear()-y)*12+((d.getMonth()+1)-m);
+}
+function discInfo(code){           // {disc, manual, auto, ms, lastImport}
+  const manual=DISC.has(code);
+  const po=store.po[code];
+  const ms=monthsSinceLastPO(code);
+  const keys=po&&po.byMonth?Object.keys(po.byMonth).filter(k=>k!=="unknown").sort():[];
+  const lastImport=keys.length?keys[keys.length-1]:null;
+  const auto=!!(po && po.imported>0 && ms!=null && ms>DISC_MONTHS);
+  return {disc:manual||auto, manual, auto, ms, lastImport};
+}
+function toggleDisc(code){
+  if(DISC.has(code)) DISC.delete(code); else DISC.add(code);
+  DB.disc=[...DISC]; saveDB();
+  if(lastResult){ const r=compute(+document.getElementById("targetMonth").value,+document.getElementById("growth").value||0); const b=bestSellers(document.getElementById("bsFrom").value,document.getElementById("bsTo").value); lastResult={res:r,best:b}; render(r,b); }
+  showProductDetail(code);   // refresh popup
 }
 
 /* ---------- คลังข้อมูล: แสดง / ลบ / สำรอง / กู้คืน ---------- */
@@ -1147,7 +1212,7 @@ function clearPO(){
 }
 function clearDB(){
   if(!confirm("ล้างคลังข้อมูลทั้งหมด (ยอดขายและ PO ที่จำไว้)?\nการกระทำนี้ย้อนกลับไม่ได้ — แนะนำให้กด 'สำรองเป็นไฟล์' ก่อน")) return;
-  DB={sales:{},po:{},poDocs:{}};
+  DB={sales:{},po:{},poDocs:{},disc:[]};
   afterVaultChange();
 }
 function backupDB(){
@@ -1163,7 +1228,7 @@ function restoreDB(file){
     try{
       const d=JSON.parse(e.target.result);
       if(!d || (!d.sales && !d.po)){ alert("ไฟล์สำรองไม่ถูกต้อง"); return; }
-      DB={sales:d.sales||{},po:d.po||{},poDocs:d.poDocs||{}};
+      DB={sales:d.sales||{},po:d.po||{},poDocs:d.poDocs||{},disc:d.disc||[]};
       afterVaultChange();
       alert("กู้คืนคลังข้อมูลเรียบร้อย\nยอดขาย "+dbSalesMonths().length+" เดือน · PO "+dbPoMonths().length+" เดือน");
     }catch(err){ alert("อ่านไฟล์สำรองไม่ได้: "+err.message); }
